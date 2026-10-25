@@ -15,18 +15,37 @@ set -euo pipefail
 
 REPO_NAME="${1:-brother-hl3040cn-native}"
 OWNER="${OWNER:-christiansiebe}"
+TOKEN_FILE="${TOKEN_FILE:-${HOME:-/root}/.gh_token}"
 TOKEN="${GH_TOKEN:-}"
 
+# Accept the token from a file as well, so it can be pasted once with an
+# editor instead of typed into the terminal.
+if [ -z "$TOKEN" ] && [ -s "$TOKEN_FILE" ]; then
+    TOKEN="$(tr -d '[:space:]' <"$TOKEN_FILE")"
+fi
+
 if [ -z "$TOKEN" ]; then
-    # Read it here rather than taking it on the command line: a token given
-    # as an argument or as GH_TOKEN=... ends up in the shell history.
-    printf 'GitHub token (needs Contents: Read and write on %s): ' "$REPO_NAME" >&2
-    read -rs TOKEN
+    # `read` fails at EOF, which under `set -e` killed this script silently.
+    # Ask, but treat "no input" as an empty token rather than an abort.
+    printf 'GitHub token for %s/%s: ' "$OWNER" "$REPO_NAME" >&2
+    if [ -t 0 ]; then
+        read -rs TOKEN || true
+    else
+        IFS= read -r TOKEN || true
+    fi
     echo >&2
 fi
 
 if [ -z "$TOKEN" ]; then
-    echo "error: no token given" >&2
+    cat >&2 <<EOF
+error: no token given.
+
+Create one (needs Contents: Read and write on ${OWNER}/${REPO_NAME}):
+  https://github.com/settings/tokens/new?scopes=repo&description=${REPO_NAME}
+
+Then either paste it at the prompt, or save it once and rerun:
+  printf '%s' 'THE_TOKEN' > ${TOKEN_FILE} && chmod 600 ${TOKEN_FILE}
+EOF
     exit 1
 fi
 
