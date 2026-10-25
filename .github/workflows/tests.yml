@@ -40,6 +40,10 @@ jobs:
         working-directory: hl3040cn/src
         run: python3 -m unittest test_gray_replace -v
 
+      - name: Toner save dither tables
+        working-directory: hl3040cn/src
+        run: python3 -m unittest test_toner_save -v
+
       - name: A4 raster geometry (against Ghostscript)
         working-directory: hl3040cn/src
         run: python3 -m unittest test_a4_geometry -v
