@@ -15,8 +15,8 @@ from collections.abc import Buffer
 import numpy as np
 import numpy.typing as npt
 
-from color_lut import ColorTable, Profile, Variant
-from settings import ColorMatching, MediaType, PrintSettings
+from color_lut import ColorTable, Profile
+from settings import ColorMatching, PrintSettings
 
 _NDArrayU8 = npt.NDArray[np.uint8]
 
@@ -30,23 +30,25 @@ _PROFILES: dict[ColorMatching, Profile] = {
 def color_table(settings: PrintSettings) -> ColorTable:
     """The colour grid `lookup_color_transform_table` selects for `settings`.
 
-    Toner save wins over glossy media, as in the original. Rich black
-    (BREnhanceBlkPrt) only exists for the rgb and srgb profiles.
+    Measured against the oracle (six primaries and R/G/B/grey ramps): the
+    chromatic grid depends only on the colour matching. Normal always uses the
+    rgb improve-gray grid, Vivid the srgb improve-gray grid, and None the cmyk
+    grid; BRGray, toner save and the media type do not change it. BRGray off
+    only adds the per-pixel achromatic replacement (`gray_replace`). Rich black
+    (BREnhanceBlkPrt) takes grid entry 0 for pure black in the rgb/srgb
+    profiles.
 
     Returns:
         The table for the colour separation.
     """
     profile = _PROFILES[settings.color_matching]
-    variant: Variant = "default"
-    if settings.toner_save:
-        variant = "density2"
-    elif settings.media_type == MediaType.GLOSSY:
-        variant = "glossy"
+    if profile == "cmyk":
+        return ColorTable(profile=profile, improve_gray=settings.improve_gray)
     return ColorTable(
         profile=profile,
-        improve_gray=settings.improve_gray,
-        variant=variant,
-        rich_black=settings.enhance_black and profile != "cmyk",
+        improve_gray=True,
+        rich_black=settings.enhance_black,
+        gray_replace=not settings.improve_gray,
     )
 
 

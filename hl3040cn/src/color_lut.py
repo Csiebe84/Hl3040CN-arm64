@@ -69,6 +69,7 @@ class ColorTable:
     improve_gray: bool = False
     variant: Variant = "default"
     rich_black: bool = False
+    gray_replace: bool = True
 
     @property
     def name(self) -> str:
@@ -84,9 +85,9 @@ INVERSE_LUT_TABLES: tuple[ColorTable, ...] = (ColorTable("rgb"), ColorTable("srg
 
 # With BRGray off (ImpGray=OFF) the oracle separates achromatic pixels
 # (R=G=B) through the cmyk grid instead of the profile grid, per pixel: a
-# sheet that is half grey and half red uses cmyk for the grey and srgb for
-# the red, so the choice is per pixel, not per page. With BRGray on the
-# profile grid alone is used. The port previously applied one grid to the
+# sheet that is half grey and half red uses cmyk for the grey and the profile
+# grid for the red, so the choice is per pixel, not per page. With BRGray on
+# the profile grid alone is used. The port previously applied one grid to the
 # whole page, which is why every grey page (e.g. `grey 50%` in compare.py)
 # diverged.
 _GRAY_REPLACE_TABLE = ColorTable("cmyk")
@@ -102,7 +103,7 @@ def gray_replace_table(table: ColorTable = DEFAULT_TABLE) -> ColorTable | None:
     Returns:
         The replacement grid, or None if no per-pixel replacement applies.
     """
-    if table.improve_gray or table.profile == "cmyk":
+    if not table.gray_replace or table.profile == "cmyk":
         return None
     return _GRAY_REPLACE_TABLE
 
@@ -402,9 +403,6 @@ def _rgb_to_cmyk_interp_arr(
     rgb_row: Buffer, width: int, table: ColorTable = DEFAULT_TABLE
 ) -> tuple[_NDArrayU8, _NDArrayU8, _NDArrayU8, _NDArrayU8]:
     """Per-pixel tetrahedral interpolation through the 17x17x17 LUT grid.
-
-    Achromatic pixels take the BRGray=OFF replacement grid when there is one
-    (see `gray_replace_table`); every other pixel uses `table`.
 
     Returns:
         (k, c, m, y) in pixel-brightness convention (0=full ink, 255=no ink).

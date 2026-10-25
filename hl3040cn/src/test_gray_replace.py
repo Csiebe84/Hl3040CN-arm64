@@ -61,32 +61,43 @@ def render(rgb: tuple[int, int, int], *, improve_gray: bool) -> bytes:
 class GrayReplaceTableTest(unittest.TestCase):
     """The grid selection that drives the per-pixel replacement."""
 
-    def test_off_selects_the_cmyk_grid(self):
-        """BRGray=OFF routes achromatic pixels through cmyk."""
-        table = color_lut.ColorTable("rgb", improve_gray=False)
+    def test_replace_flag_selects_the_cmyk_grid(self):
+        """With `gray_replace` set, achromatic pixels go through cmyk."""
+        table = color_lut.ColorTable("rgb", gray_replace=True)
         self.assertEqual(color_lut.gray_replace_table(table), color_lut.ColorTable("cmyk"))
 
-    def test_on_has_no_replacement(self):
-        """BRGray=ON keeps the profile grid, so there is nothing to replace."""
-        table = color_lut.ColorTable("rgb", improve_gray=True)
+    def test_without_the_flag_there_is_no_replacement(self):
+        """BRGray=ON leaves `gray_replace` clear, so nothing is replaced."""
+        table = color_lut.ColorTable("rgb", gray_replace=False)
         self.assertIsNone(color_lut.gray_replace_table(table))
 
     def test_cmyk_matching_is_its_own_replacement(self):
         """With colour matching None the cmyk grid is already in use."""
-        table = color_lut.ColorTable("cmyk", improve_gray=False)
+        table = color_lut.ColorTable("cmyk", gray_replace=True)
         self.assertIsNone(color_lut.gray_replace_table(table))
 
     def test_glossy_and_toner_save_keep_the_replacement(self):
         """The variant must not disable the replacement."""
         for variant in ("density2", "glossy"):
-            table = color_lut.ColorTable("rgb", improve_gray=False, variant=variant)
+            table = color_lut.ColorTable("rgb", gray_replace=True, variant=variant)
             self.assertEqual(color_lut.gray_replace_table(table), color_lut.ColorTable("cmyk"))
 
     def test_gray_grid_differs_from_the_profile_grid(self):
         """A replacement that returned the same grid would be a no-op."""
-        profile = color_lut.interp_arrays(color_lut.ColorTable("rgb"))[0]
+        profile = color_lut.interp_arrays(color_lut.ColorTable("rgb", improve_gray=True))[0]
         gray = color_lut.interp_arrays(color_lut.ColorTable("cmyk"))[0]
         self.assertFalse((profile == gray).all(), "cmyk and rgb grids are identical")
+
+    def test_color_table_sets_the_flag_from_the_setting(self):
+        """`transforms.color_table` is what wires BRGray to `gray_replace`."""
+        import transforms
+
+        for improve_gray, expected in ((False, True), (True, False)):
+            settings = PrintSettings()
+            settings.improve_gray = improve_gray
+            table = transforms.color_table(settings)
+            self.assertEqual(table.gray_replace, expected)
+            self.assertTrue(table.improve_gray, "rgb/srgb always use the *_ig grid")
 
 
 class GrayOutputTest(unittest.TestCase):
