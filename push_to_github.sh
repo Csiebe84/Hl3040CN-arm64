@@ -76,24 +76,59 @@ def api(path):
     except Exception as e:
         return 0, {"message": str(e)}
 
+def can_push(o, r):
+    st, bd = api("/repos/%s/%s" % (o, r))
+    if st == 200:
+        return bool(bd.get("permissions", {}).get("push")), st
+    return False, st
+
 status, body = api("/user")
 if status != 200:
     print("ERR|Token abgelehnt (HTTP %s): %s" % (status, body.get("message", "")))
     sys.exit(0)
 login = body.get("login", "?")
 
-status, body = api("/repos/%s/%s" % (owner, repo))
-if status == 200:
-    if body.get("permissions", {}).get("push"):
-        print("OK|Angemeldet als %s, Schreibrecht auf %s/%s bestaetigt." % (login, owner, repo))
-    else:
-        print("ERR|Angemeldet als %s, aber kein Schreibrecht auf %s/%s. "
-              "Beim Token 'Contents: Read and write' setzen." % (login, owner, repo))
-elif status == 404:
-    print("ERR|Angemeldet als %s, aber %s/%s ist fuer diesen Token nicht sichtbar. "
-          "Repository-Auswahl des Tokens pruefen." % (login, owner, repo))
+# The token's own account is the owner that almost always works: a token
+# usually belongs to whoever created the repository.
+ok, st = can_push(login, repo)
+if ok and login != owner:
+    print("OK|Angemeldet als %s, Schreibrecht auf %s/%s bestaetigt. "
+          "Hinweis: das Repository liegt unter '%s', nicht unter '%s'."
+          % (login, login, repo, login, owner))
+    print("OWNER|%s" % login)
+    sys.exit(0)
+if ok:
+    print("OK|Angemeldet als %s, Schreibrecht auf %s/%s bestaetigt." % (login, owner, repo))
+    sys.exit(0)
+
+ok, st = can_push(owner, repo)
+if ok:
+    print("OK|Angemeldet als %s, Schreibrecht auf %s/%s bestaetigt." % (login, owner, repo))
+    sys.exit(0)
+
+# Neither place worked. Look through what the token CAN see, so the error
+# names the right owner instead of leaving the user to guess.
+st, body = api("/user/repos?per_page=100&affiliation=owner,collaborator,organization_member")
+found = []
+if st == 200 and isinstance(body, list):
+    for r in body:
+        if r.get("name", "").lower() == repo.lower():
+            found.append((r["owner"]["login"], bool(r.get("permissions", {}).get("push"))))
+
+if found:
+    lines = []
+    for o, push in found:
+        lines.append("  %s/%s (%s)" % (o, repo, "Schreibrecht" if push else "nur Lesen"))
+    print("ERR|Angemeldet als %s. Das Repository '%s' liegt nicht unter '%s', "
+          "sondern unter:\n%s\nMit dem richtigen Namen starten, z.B.:\n"
+          "  ./push_to_github.sh %s"
+          % (login, repo, owner, "\n".join(lines), found[0][0]))
 else:
-    print("ERR|Repository-Abfrage fehlgeschlagen (HTTP %s)." % status)
+    print("ERR|Angemeldet als %s. Weder %s/%s noch %s/%s sind mit diesem Token "
+          "sichtbar, und kein Repository namens '%s' ist erreichbar.\n"
+          "Moeglich: das Repo liegt unter einem anderen Konto, oder der Token "
+          "hat es nicht in seiner Repository-Auswahl."
+          % (login, owner, repo, login, repo, repo))
 PY
 }
 
@@ -136,6 +171,15 @@ fi
 printf '  Pruefe Token bei GitHub ...\n' >&2
 RESULT="$(verify_token "$TOKEN")"
 case "$RESULT" in
+    *OWNER\|*)
+        # The repository turned out to live under a different account than
+        # the one asked for. Use it rather than failing on a stale name.
+        DETECTED="${RESULT##*OWNER|}"
+        MSG="${RESULT%$'\n'OWNER|*}"
+        printf '  %s\n' "${MSG#OK|}" >&2
+        OWNER="$DETECTED"
+        printf '  Owner auf %s gesetzt.\n' "$OWNER" >&2
+        ;;
     OK\|*)  printf '  %s\n' "${RESULT#OK|}" >&2 ;;
     ERR\|*) printf '\n  FEHLER: %s\n\n' "${RESULT#ERR|}" >&2; exit 1 ;;
     *)      printf '\n  FEHLER: unerwartete Antwort der Pruefung.\n\n' >&2; exit 1 ;;
