@@ -120,8 +120,10 @@ mkdir -p "$BUILD_DIR/src"
 cp "$REPO_ROOT/setup_cython.py" "$BUILD_DIR/" 2>/dev/null || true
 cp "$REPO_ROOT/src/"_*_fast.pyx "$BUILD_DIR/src/" 2>/dev/null || true
 cp "$REPO_ROOT/src/"_*_fast.pxd "$BUILD_DIR/src/" 2>/dev/null || true
+# --force: setuptools skips a .pyx whose .c file is newer and never
+# notices a .pxd edit, so an incremental build can leave a stale .so.
 if "$VENV_DIR/bin/pip" install --quiet cython setuptools \
-    && (cd "$BUILD_DIR" && "$VENV_DIR/bin/python3" setup_cython.py build_ext --inplace >/dev/null 2>&1) \
+    && (cd "$BUILD_DIR" && "$VENV_DIR/bin/python3" setup_cython.py build_ext --inplace --force >/dev/null 2>&1) \
     && compgen -G "$BUILD_DIR/src/_*_fast*.so" >/dev/null; then
     cp "$BUILD_DIR/src/"_*_fast*.so "$LIB_DIR/"
     echo "  Cython extensions installed."
