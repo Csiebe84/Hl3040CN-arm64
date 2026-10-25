@@ -10,15 +10,23 @@
 #         -d '{"name":"brother-hl3040cn-native","private":true}'
 #
 # Usage:
-#   GH_TOKEN=<token-with-repo-scope> ./push_to_github.sh [repo-name]
+#   ./push_to_github.sh [repo-name]        # then paste the token at the prompt
 set -euo pipefail
 
 REPO_NAME="${1:-brother-hl3040cn-native}"
 OWNER="${OWNER:-christiansiebe}"
-TOKEN="${GH_TOKEN:-${GITHUB_WRITE_TOKEN:-}}"
+TOKEN="${GH_TOKEN:-}"
 
 if [ -z "$TOKEN" ]; then
-    echo "error: set GH_TOKEN (needs repo write access)" >&2
+    # Read it here rather than taking it on the command line: a token given
+    # as an argument or as GH_TOKEN=... ends up in the shell history.
+    printf 'GitHub token (needs Contents: Read and write on %s): ' "$REPO_NAME" >&2
+    read -rs TOKEN
+    echo >&2
+fi
+
+if [ -z "$TOKEN" ]; then
+    echo "error: no token given" >&2
     exit 1
 fi
 
