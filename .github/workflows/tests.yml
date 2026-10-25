@@ -1,0 +1,45 @@
+name: tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+# Read-only: the job only runs tests and reports.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  a4:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # numpy is the only third-party import (PPM raster checks).
+      - name: Install dependencies
+        run: pip install --quiet numpy
+
+      - name: Install Ghostscript
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ghostscript
+
+      - name: Geometry and consistency tests
+        working-directory: hl3040cn/src
+        run: python3 -m unittest test_consistency -v
+
+      - name: A4 raster geometry (against Ghostscript)
+        working-directory: hl3040cn/src
+        run: python3 -m unittest test_a4_geometry -v
+
+      - name: Ghostscript version
+        if: always()
+        run: gs --version

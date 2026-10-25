@@ -1,0 +1,298 @@
+#!/usr/bin/env python3
+"""
+CUPS filter for the Brother HL-3040CN.
+
+Receives PostScript from CUPS, rasterizes it with Ghostscript and streams
+the pages through the XL2HB pipeline (pipeline.filter_pages).
+
+Usage (called by CUPS):
+    brhl3040cn-filter job-id user title copies options [filename]
+"""
+
+import itertools
+import logging
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+# Installed, the modules live next to this script in /usr/local/lib/brhl3040cn/
+# (the CUPS wrapper also sets PYTHONPATH); in the repository they are in src/.
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_SRC_DIR = os.path.join(os.path.dirname(_SCRIPT_DIR), "src")
+sys.path.insert(0, _SRC_DIR if os.path.isdir(_SRC_DIR) else _SCRIPT_DIR)
+
+from page_stream import iter_ppm_pages  # noqa: E402
+from pipeline import collect_rows, filter_pages, is_blank_page  # noqa: E402
+from settings import DuplexMode, PrintSettings, read_ppd_defaults  # noqa: E402
+from xl2hb import PAPER_SIZES  # noqa: E402
+
+# The 3040 sets SetPageOrigin(0, 0): the image starts at the physical page
+# edge, unlike the 4150 which offsets by 100 px at 600 dpi.
+PRINTABLE_OFFSET = (0, 0)
+
+# Paper dimensions in PostScript points, exactly as the PPD's PaperDimension
+# states them. Kept for validation (test_consistency checks the PPD against
+# this table); it is deliberately NOT used to size the Ghostscript device,
+# see build_gs_command.
+PAPER_POINTS = {
+    "A4": (595, 842),
+    "Letter": (612, 792),
+    "Legal": (612, 1008),
+    "Executive": (522, 756),
+    "A5": (420, 595),
+    "JISB5": (516, 729),
+    "Postcard": (284, 419),
+    "EnvDL": (312, 624),
+    "EnvC5": (459, 649),
+    "Env10": (297, 684),
+    "EnvMonarch": (279, 540),
+    "PRA5Rotated": (595, 420),
+    "A6": (297, 420),
+    "ISOB5": (499, 709),
+    "ISOB6": (354, 499),
+    "JISB6": (363, 516),
+    "Br3x5": (216, 360),
+    # A4 Long is an HL-3040CN size the 4150 does not have; dimensions from
+    # Brother's own 3040 PPD (595 x 1148 pt).
+    "BrA4Long": (595, 1148),
+    "FanFoldGermanLegal": (612, 936),
+    "EnvPRC5Rotated": (624, 312),
+    "EnvYou4": (298, 666),
+    "EnvChou3": (340, 666),
+}
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s: brhl3040cn-filter: %(message)s",
+    stream=sys.stderr,
+)
+logger = logging.getLogger("brhl3040cn-filter")
+
+
+def find_gs() -> str:
+    """Locate the Ghostscript binary or exit.
+
+    Returns:
+        Path to the gs executable.
+    """
+    gs = shutil.which("gs")
+    if gs is None:
+        # CUPS runs filters with a minimal PATH; try the usual install prefixes.
+        for alt in ["/opt/homebrew/bin/gs", "/usr/local/bin/gs"]:
+            if os.path.isfile(alt):
+                gs = alt
+                break
+    if gs is None:
+        logger.error("Ghostscript (gs) not found in PATH")
+        sys.exit(1)
+    return gs
+
+
+def build_gs_command(input_path: str, page_size: str) -> list[str]:
+    """Build the Ghostscript command for rasterizing PS to PPM.
+
+    Sizes the device with `-g<width>x<height>` in device pixels taken from
+    `PAPER_SIZES`, exactly as Brother's own `psconvertij2` does. Going
+    through `-dDEVICEWIDTHPOINTS` instead rounds the page to the PPD's
+    point size (A4 842 pt -> 7017 px) and overshoots Brother by 36 rows,
+    which shifts every page 1.5 mm down and drops the bottom rows.
+
+    The `.HWMargins` prologue is part of Brother's invocation and only
+    shows up for content near the physical page edge; without it such
+    rows land at the paper margin instead of inside it.
+    """
+    cmd = [
+        find_gs(),
+        "-sDEVICE=ppmraw",
+        "-r600",
+        "-dBATCH",
+        "-dNOPAUSE",
+        "-dSAFER",
+        "-dQUIET",
+        "-sstdout=%stderr",
+        "-sOutputFile=-",
+    ]
+
+    width, height = PAPER_SIZES[page_size]
+    cmd.extend([f"-g{width}x{height}"])
+    cmd.extend(["-c", "<< /HWMargins [12.0 12.0 12.0 12.0] >> setpagedevice", "-f", input_path])
+    return cmd
+
+
+_DSC_PAGES = re.compile(rb"^%%Pages:[ \t]*(\d+)", re.MULTILINE)
+
+
+def count_ps_pages(input_path: str) -> int:
+    """Count the pages of a PostScript job.
+
+    Uses the DSC ``%%Pages:`` comment when present (pdftops writes it in
+    the trailer, so this is instant); otherwise lets Ghostscript interpret
+    the job on the null device and counts EndPage calls, which takes
+    ~15 s for 130 pages on a Pi 3.
+
+    Returns:
+        Number of pages the job produces.
+    """
+    with open(input_path, "rb") as f:
+        head = f.read(65536)
+        f.seek(0, os.SEEK_END)
+        f.seek(max(0, f.tell() - 65536))
+        tail = f.read()
+    # A header value wins unless it says (atend); the trailer's last one otherwise.
+    for chunk, pick in ((head, 0), (tail, -1)):
+        found = _DSC_PAGES.findall(chunk)
+        if found:
+            return int(found[pick])
+
+    logger.info("no DSC page count, counting pages with Ghostscript")
+    cmd = [
+        find_gs(),
+        "-q", "-dSAFER", "-dBATCH", "-dNOPAUSE", "-sDEVICE=nullpage", "-r72",
+        "-c", "<< /EndPage { exch pop 2 ne dup { (%%BRPAGE%%\\n) print flush } if } >> setpagedevice",
+        "-f", input_path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, check=True)
+    return result.stdout.count(b"%%BRPAGE%%")
+
+
+def iter_printable_pages(stream, page_size: str):
+    """Yield (width, height, row_blocks) per GS page, cut to the printable area.
+
+    Pages are read on a background thread in blocks of scanlines (see
+    page_stream), so Ghostscript keeps rasterising while a page renders
+    and no page-sized buffer is allocated.
+    """
+    target_w, target_h = PAPER_SIZES[page_size]
+    window = (*PRINTABLE_OFFSET, target_w, target_h)
+    for page_num, (src_w, src_h, blocks) in enumerate(iter_ppm_pages(stream, window), start=1):
+        logger.info("page %d: %dx%d pixels from GS, printable %dx%d", page_num, src_w, src_h, target_w, target_h)
+        yield target_w, target_h, blocks
+
+
+def drop_blank_pages(pages):
+    """Collect each page into one buffer and skip the pure-white ones."""
+    for width, height, data in pages:
+        rows = collect_rows(data, width, height)
+        if is_blank_page(rows):
+            logger.info("skipping blank page")
+            continue
+        yield width, height, rows
+
+
+def main() -> None:
+    # Parse CUPS filter arguments
+    # Usage: filter job-id user title copies options [filename]
+    if len(sys.argv) < 6:
+        logger.error("Usage: %s job-id user title copies options [filename]", sys.argv[0])
+        sys.exit(1)
+
+    job_id = sys.argv[1]
+    user = sys.argv[2]
+    title = sys.argv[3]
+    copies = int(sys.argv[4])
+    options_str = sys.argv[5]
+    input_file = sys.argv[6] if len(sys.argv) > 6 else None
+
+    logger.info("job=%s user=%s title=%r copies=%d", job_id, user, title, copies)
+
+    # The queue's PPD defaults first (CUPS passes only the job's own
+    # options), then the job options on top.
+    ppd_path = os.environ.get("PPD")
+    ppd_defaults = read_ppd_defaults(ppd_path) if ppd_path else {}
+    settings = PrintSettings.from_cups_options(options_str, copies, ppd_defaults)
+    logger.info("settings: page_size=%s duplex=%s resolution=%s mono=%s color_matching=%s gray=%s toner_save=%s",
+                settings.page_size, settings.duplex, settings.resolution, settings.mono_color,
+                settings.color_matching, settings.improve_gray, settings.toner_save)
+
+    # Reversed long-edge duplex needs the page count up front: a page's
+    # position in the reversed job decides whether it is a back side.
+    needs_page_count = settings.reverse and settings.duplex == DuplexMode.NO_TUMBLE
+
+    # Ghostscript reads the job straight from stdin, so it starts
+    # rasterising while pdftops is still producing PostScript. Only
+    # counting pages needs the whole job in a file first.
+    tmp_input = None
+    if input_file is None and needs_page_count:
+        tmp_input = tempfile.NamedTemporaryFile(suffix=".ps", delete=False)
+        try:
+            shutil.copyfileobj(sys.stdin.buffer, tmp_input)
+            tmp_input.close()
+            input_file = tmp_input.name
+        except Exception:
+            os.unlink(tmp_input.name)
+            raise
+
+    try:
+        expected_pages = None
+        if needs_page_count:
+            expected_pages = count_ps_pages(input_file)
+            logger.info("reverse long-edge duplex: %d pages", expected_pages)
+
+        # Run Ghostscript: PS -> PPM stream ("-" reads the inherited stdin).
+        # Its stderr goes to a file: a pipe nobody reads while the pages
+        # render would block Ghostscript once it filled up.
+        gs_cmd = build_gs_command(input_file or "-", settings.page_size)
+        logger.info("running: %s", ' '.join(gs_cmd))
+
+        gs_stderr_file = tempfile.TemporaryFile()
+        gs_proc = subprocess.Popen(
+            gs_cmd,
+            stdout=subprocess.PIPE,
+            stderr=gs_stderr_file,
+        )
+
+        # Stream pages from GS into one XL2HB session, like Brother's filter:
+        # each page is rendered and sent as soon as it is read, so only the
+        # current page is held in RAM. Reverse order spools rendered pages
+        # to disk instead (see filter_pages).
+        page_count = 0
+
+        def counted(it):
+            nonlocal page_count
+            for page in it:
+                page_count += 1
+                yield page
+
+        pages = counted(iter_printable_pages(gs_proc.stdout, settings.page_size))
+        if settings.skip_blank and settings.duplex == DuplexMode.NONE:
+            pages = drop_blank_pages(pages)
+
+        first = next(pages, None)
+        if first is not None:
+            output = sys.stdout.buffer
+            filter_pages(
+                itertools.chain([first], pages),
+                settings,
+                output,
+                page_count=expected_pages,
+            )
+            output.flush()
+
+        gs_proc.wait()
+        gs_stderr_file.seek(0)
+        gs_stderr = gs_stderr_file.read().decode("utf-8", errors="replace").strip()
+        gs_stderr_file.close()
+        if gs_stderr:
+            logger.info("GS stderr: %s", gs_stderr)
+        if gs_proc.returncode != 0:
+            logger.error("Ghostscript exited with code %d", gs_proc.returncode)
+            sys.exit(1)
+
+        if page_count == 0:
+            logger.error("No pages produced by Ghostscript")
+            sys.exit(1)
+
+        logger.info("total pages: %d", page_count)
+        logger.info("done")
+
+    finally:
+        if tmp_input:
+            os.unlink(tmp_input.name)
+
+
+if __name__ == "__main__":
+    main()
