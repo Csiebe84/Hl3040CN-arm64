@@ -13,10 +13,12 @@ set -uo pipefail
 REPO_NAME="brother-hl3040cn-native"
 CHECK=0
 SAVE=0
+DIAGNOSE=0
 for arg in "$@"; do
     case "$arg" in
         --check) CHECK=1 ;;
         --save)  SAVE=1 ;;
+        --diagnose) DIAGNOSE=1 ;;
         --*)     printf 'unbekannte Option: %s\n' "$arg" >&2; exit 2 ;;
         *)       REPO_NAME="$arg" ;;
     esac
@@ -124,11 +126,69 @@ if found:
           "  ./push_to_github.sh %s"
           % (login, repo, owner, "\n".join(lines), found[0][0]))
 else:
-    print("ERR|Angemeldet als %s. Weder %s/%s noch %s/%s sind mit diesem Token "
-          "sichtbar, und kein Repository namens '%s' ist erreichbar.\n"
-          "Moeglich: das Repo liegt unter einem anderen Konto, oder der Token "
-          "hat es nicht in seiner Repository-Auswahl."
-          % (login, owner, repo, login, repo, repo))
+    if login == owner:
+        print("ERR|Angemeldet als %s. Das Repository %s/%s ist mit diesem Token "
+              "nicht sichtbar.\n"
+              "Bei einem fine-grained Token muss es unter 'Repository access' "
+              "ausgewaehlt und 'Contents: Read and write' gesetzt sein.\n"
+              "Was der Token sieht: ./push_to_github.sh --diagnose"
+              % (login, owner, repo))
+    else:
+        print("ERR|Angemeldet als %s. Weder %s/%s noch %s/%s sind mit diesem "
+              "Token sichtbar, und kein Repository namens '%s' ist erreichbar.\n"
+              "Moeglich: das Repo liegt unter einem anderen Konto, oder der "
+              "Token hat es nicht in seiner Repository-Auswahl.\n"
+              "Was der Token sieht: ./push_to_github.sh --diagnose"
+              % (login, owner, repo, login, repo, repo))
+PY
+}
+
+diagnose() {
+    python3 - "$1" <<'PY'
+import json, sys, urllib.error, urllib.request
+token = sys.argv[1]
+
+def call(path, raw=False):
+    req = urllib.request.Request(
+        "https://api.github.com" + path,
+        headers={"Authorization": "token " + token,
+                 "Accept": "application/vnd.github+json",
+                 "User-Agent": "hl3040cn-push"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return r.status, r.read(), r.headers
+    except urllib.error.HTTPError as e:
+        return e.code, e.read(), e.headers
+    except Exception as e:
+        return 0, str(e).encode(), {}
+
+st, raw, hdrs = call("/user")
+if st != 200:
+    print("  Token ungueltig (HTTP %s)." % st)
+    sys.exit(1)
+me = json.loads(raw)
+print("  Konto:    %s (id %s)" % (me.get("login"), me.get("id")))
+scopes = hdrs.get("x-oauth-scopes")
+if scopes is None:
+    print("  Typ:      fine-grained (kein Scope-Header)")
+else:
+    print("  Scopes:   %s" % (scopes or "(keine)"))
+    if "repo" not in scopes.split(","):
+        print("            -> 'repo' fehlt! Ohne den Scope sieht der Token")
+        print("               keine privaten Repositories.")
+
+print("  Sichtbare Repositories:")
+st, raw, _ = call("/user/repos?per_page=100&affiliation=owner,collaborator,organization_member")
+if st == 200:
+    repos = json.loads(raw)
+    if not repos:
+        print("    (keine)")
+    for r in repos:
+        perm = "Schreibrecht" if r.get("permissions", {}).get("push") else "nur Lesen"
+        print("    %-45s %s" % (r["full_name"], perm))
+else:
+    print("    Abfrage fehlgeschlagen (HTTP %s)" % st)
 PY
 }
 
@@ -168,6 +228,13 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 
 # --- Pruefen, BEVOR git angefasst wird --------------------------------------
+if [ "$DIAGNOSE" = "1" ]; then
+    printf '\n  Was dieser Token sieht:\n' >&2
+    diagnose "$TOKEN" >&2
+    printf '\n' >&2
+    exit 0
+fi
+
 printf '  Pruefe Token bei GitHub ...\n' >&2
 RESULT="$(verify_token "$TOKEN")"
 case "$RESULT" in
