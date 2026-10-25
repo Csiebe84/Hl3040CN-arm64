@@ -36,10 +36,48 @@ def ppm(width: int, height: int, pixel_fn) -> bytes:
     return b"P6\n%d %d\n255\n" % (width, height) + bytes(body)
 
 
-def oracle(data: bytes) -> bytes:
-    """Run Brother's filter over a PPM and return its output."""
+def oracle_rc(settings: PrintSettings) -> str:
+    """Render an rc file for the oracle from the same settings the port uses.
+
+    The container's own rc is edited by hand for other experiments, so reading
+    it would make this comparison depend on whatever was last written there.
+    Deriving it from `settings` keeps both sides on the same page size and
+    colour mode.
+    """
+    return "\n".join([
+        "[HL3040CN]",
+        f"MediaType={settings.media_type}",
+        f"PageSize={settings.page_size}",
+        f"InputSlot={settings.input_slot}",
+        f"BRResolution={settings.resolution}",
+        f"Copies={settings.copies}",
+        "BRReverse=OFF",
+        f"BRMonoColor={settings.mono_color}",
+        f"BRColorMatching={settings.color_matching}",
+        f"BRGray={'ON' if settings.improve_gray else 'OFF'}",
+        f"BREnhanceBlkPrt={'ON' if settings.enhance_black else 'OFF'}",
+        f"TonerSaveMode={'ON' if settings.toner_save else 'OFF'}",
+        f"BRImproveOutput={settings.improve_output}",
+        f"Brightness={settings.brightness}",
+        f"Contrast={settings.contrast}",
+        f"RedKey={settings.red}",
+        f"GreenKey={settings.green}",
+        f"BlueKey={settings.blue}",
+        f"Saturation={settings.saturation}",
+        "Language=us",
+        "",
+    ])
+
+
+def oracle(data: bytes, settings: PrintSettings) -> bytes:
+    """Run Brother's filter over a PPM with settings-matched rc, return output."""
+    subprocess.run(
+        ["docker", "exec", "-i", CONTAINER, "sh", "-c", "cat > /tmp/compare.rc"],
+        input=oracle_rc(settings).encode(), check=True,
+    )
     return subprocess.run(
-        ["docker", "exec", "-i", CONTAINER, "sh", "-c", f"{FILTER} -pi {PAPER_INF} -rc {RC}"],
+        ["docker", "exec", "-i", CONTAINER, "sh", "-c",
+         f"{FILTER} -pi {PAPER_INF} -rc /tmp/compare.rc"],
         input=data, capture_output=True, check=False,
     ).stdout
 
@@ -67,7 +105,7 @@ def session(stream: bytes) -> bytes:
 
 def compare(name: str, data: bytes, width: int, height: int, settings: PrintSettings) -> bool:
     """Report whether native output matches the oracle for one page."""
-    want = session(oracle(data))
+    want = session(oracle(data, settings))
     got = session(native(data, width, height, settings))
     if want == got:
         print(f"  {name:28s} OK      {len(got):7d} bytes identical")
