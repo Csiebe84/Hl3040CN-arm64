@@ -1,7 +1,13 @@
 #!/bin/bash
 #
 # Install the open-source Brother HL-3040CN CUPS driver.
-# Requires: root, Python 3.13+, Ghostscript, CUPS.
+# Requires: root, Python 3 (3.9+; 3.11 and 3.12 are tested),
+#           Ghostscript, CUPS.
+#
+# The driver needs Brother's calibration tables. Run
+#   ../scripts/extract_blobs.sh
+# once before installing, otherwise dithering falls back to Bayer and the
+# output will not match the original.
 #
 set -euo pipefail
 
