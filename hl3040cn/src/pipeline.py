@@ -186,6 +186,7 @@ LineCodes = tuple[bytes, bytes, bytes, bytes]
 
 _BLANK_LINE: LineCodes = (b"", b"", b"", b"")
 _EMPTY_TABLE = np.empty(0, dtype=np.uint8)
+_EMPTY_U8 = np.empty(0, dtype=np.uint8)
 
 # Scanlines per band handed to the native kernel; also the unit of work
 # for the render threads.
@@ -321,15 +322,33 @@ def _encode_lines_mono(
 
 
 class _KernelColour(NamedTuple):
-    """Colour arguments of `render_band`: the inverse LUT, or the grid to interpolate."""
+    """Colour arguments of `render_band`: the inverse LUT, or the grid to interpolate.
+
+    `gray_*` are the BRGray=OFF replacement for achromatic pixels; all empty
+    when no replacement applies.
+    """
 
     inverse: npt.NDArray[np.uint8]
     grid: npt.NDArray[np.int32]
     weights: npt.NDArray[np.uint8]
     black: npt.NDArray[np.int32]
+    gray_inverse: npt.NDArray[np.uint8]
+    gray_grid: npt.NDArray[np.int32]
+    gray_weights: npt.NDArray[np.uint8]
+    gray_black: npt.NDArray[np.int32]
 
 
 _EMPTY_INT = np.empty(0, dtype=np.int32)
+
+
+def _kernel_colour_for(table: color_lut.ColorTable) -> _KernelColour:
+    """Inverse-LUT or interpolated grid arguments for one colour table."""
+    inverse = color_lut.inverse_lut(table)
+    if inverse is not None:
+        return _KernelColour(inverse.reshape(-1), _EMPTY_INT, _EMPTY_U8, _EMPTY_INT,
+                             _EMPTY_U8, _EMPTY_INT, _EMPTY_U8, _EMPTY_INT)
+    grid, weights, black = color_lut.interp_arrays(table)
+    return _KernelColour(_EMPTY_U8, grid, weights, black, _EMPTY_U8, _EMPTY_INT, _EMPTY_U8, _EMPTY_INT)
 
 
 def _band_kernel_colour(
@@ -339,7 +358,8 @@ def _band_kernel_colour(
 
     The kernel covers Normal mode with threshold-matrix dither channels and
     needs the native module. It gathers through the installed inverse LUT of
-    `table` when there is one and interpolates the grid otherwise.
+    `table` when there is one and interpolates the grid otherwise. With BRGray
+    off it also carries the cmyk replacement grid for achromatic pixels.
 
     Returns:
         The kernel's colour arguments, or None for the per-line path.
@@ -348,10 +368,14 @@ def _band_kernel_colour(
         return None
     if any(channel.threshold_matrix is None for channel in channels.values()):
         return None
-    inverse = color_lut.inverse_lut(table)
-    if inverse is not None:
-        return _KernelColour(inverse.reshape(-1), _EMPTY_INT, _EMPTY_TABLE, _EMPTY_INT)
-    return _KernelColour(_EMPTY_TABLE, *color_lut.interp_arrays(table))
+    colour = _kernel_colour_for(table)
+    replacement = color_lut.gray_replace_table(table)
+    if replacement is None:
+        return colour
+    gray = _kernel_colour_for(replacement)
+    return colour._replace(
+        gray_inverse=gray.inverse, gray_grid=gray.grid, gray_weights=gray.weights, gray_black=gray.black
+    )
 
 
 def _render_threads() -> int:

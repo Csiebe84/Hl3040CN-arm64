@@ -82,6 +82,30 @@ DEFAULT_TABLE = ColorTable()
 # other table is interpolated per pixel.
 INVERSE_LUT_TABLES: tuple[ColorTable, ...] = (ColorTable("rgb"), ColorTable("srgb"))
 
+# With BRGray off (ImpGray=OFF) the oracle separates achromatic pixels
+# (R=G=B) through the cmyk grid instead of the profile grid, per pixel: a
+# sheet that is half grey and half red uses cmyk for the grey and srgb for
+# the red, so the choice is per pixel, not per page. With BRGray on the
+# profile grid alone is used. The port previously applied one grid to the
+# whole page, which is why every grey page (e.g. `grey 50%` in compare.py)
+# diverged.
+_GRAY_REPLACE_TABLE = ColorTable("cmyk")
+
+
+def gray_replace_table(table: ColorTable = DEFAULT_TABLE) -> ColorTable | None:
+    """Grid the oracle uses for achromatic pixels, or None when there is none.
+
+    BRGray=ON (`improve_gray`) keeps the profile grid for grey too; BRGray=OFF
+    routes R=G=B pixels through the cmyk grid. The cmyk profile is its own
+    replacement (a no-op), so `None` colour matching is unaffected.
+
+    Returns:
+        The replacement grid, or None if no per-pixel replacement applies.
+    """
+    if table.improve_gray or table.profile == "cmyk":
+        return None
+    return _GRAY_REPLACE_TABLE
+
 
 def _load_lut(table: ColorTable = DEFAULT_TABLE) -> npt.NDArray[np.int32]:
     """Load the 3D color grid of `table` as unpacked CMYK channels.
@@ -288,27 +312,45 @@ def rgb_to_cmyk_lut_arr(
 ) -> tuple[_NDArrayU8, _NDArrayU8, _NDArrayU8, _NDArrayU8]:
     """Like :func:`rgb_to_cmyk_lut` but returns ndarrays directly.
 
-    Lets callers in the hot path avoid a bytes→ndarray roundtrip.
+    Lets callers in the hot path avoid a bytes→ndarray roundtrip. When BRGray
+    is off, achromatic pixels are re-gathered through the replacement grid
+    (`gray_replace_table`).
 
     Returns:
         (k, c, m, y) uint8 arrays of length `width`.
+    """
+    planes = _gather_planes(rgb_row, width, table)
+    replacement = gray_replace_table(table)
+    if replacement is not None:
+        rgb = np.frombuffer(rgb_row, dtype=np.uint8, count=width * 3).reshape(width, 3)
+        achromatic = (rgb[:, 0] == rgb[:, 1]) & (rgb[:, 1] == rgb[:, 2])
+        if np.any(achromatic):
+            repl = _gather_planes(rgb_row, width, replacement)
+            planes[:, achromatic] = repl[:, achromatic]
+    return planes[0], planes[1], planes[2], planes[3]
+
+
+def _gather_planes(rgb_row: Buffer, width: int, table: ColorTable) -> npt.NDArray[np.uint8]:
+    """Gather the (K, C, M, Y) planes of `table` for a row, via the fastest path.
+
+    Returns:
+        (4, width) uint8 array, rows K, C, M, Y in pixel-brightness convention.
     """
     inv = inverse_lut(table)
     if inv is not None and HAS_CYTHON_COLOR:
         planes = np.empty((4, width), dtype=np.uint8)
         gather_kcmy(rgb_row, width, inv.reshape(-1), planes[0], planes[1], planes[2], planes[3])
-        return planes[0], planes[1], planes[2], planes[3]
+        return planes
     if inv is not None:
         rgb = np.frombuffer(rgb_row, dtype=np.uint8, count=width * 3).reshape(width, 3)
         idx = (rgb[:, 0].astype(np.uint32) << 16) | (rgb[:, 1].astype(np.uint32) << 8) | rgb[:, 2].astype(np.uint32)
-        kcmy = np.ascontiguousarray(inv.reshape(-1, 4)[idx])
-        return kcmy[:, 0], kcmy[:, 1], kcmy[:, 2], kcmy[:, 3]
+        return np.ascontiguousarray(inv.reshape(-1, 4)[idx].T)
     if HAS_CYTHON_COLOR:
         planes = np.empty((4, width), dtype=np.uint8)
         interp_kcmy(rgb_row, width, *interp_arrays(table), planes[0], planes[1], planes[2], planes[3])
-        return planes[0], planes[1], planes[2], planes[3]
+        return planes
     _warn_interp_fallback(table)
-    return _rgb_to_cmyk_interp_arr(rgb_row, width, table)
+    return np.stack(_rgb_to_cmyk_interp_arr(rgb_row, width, table))
 
 
 @functools.cache
@@ -343,10 +385,26 @@ def rgb_to_cmyk_lut(
     return k.tobytes(), c.tobytes(), m.tobytes(), y.tobytes()
 
 
+def _interp_cmyk(
+    corners: npt.NDArray[np.int32], w: npt.NDArray[np.int32], total: npt.NDArray[np.int32]
+) -> npt.NDArray[np.int32]:
+    """Weighted-sum interpolation of gathered cube corners.
+
+    Returns:
+        (n, 4) int32 C, M, Y, K ink amounts.
+    """
+    accum = (w[:, :, None] * corners).sum(axis=1)
+    rounding = (total >> 1)[:, None]
+    return (accum + rounding) // total[:, None]
+
+
 def _rgb_to_cmyk_interp_arr(
     rgb_row: Buffer, width: int, table: ColorTable = DEFAULT_TABLE
 ) -> tuple[_NDArrayU8, _NDArrayU8, _NDArrayU8, _NDArrayU8]:
     """Per-pixel tetrahedral interpolation through the 17x17x17 LUT grid.
+
+    Achromatic pixels take the BRGray=OFF replacement grid when there is one
+    (see `gray_replace_table`); every other pixel uses `table`.
 
     Returns:
         (k, c, m, y) in pixel-brightness convention (0=full ink, 255=no ink).
@@ -378,13 +436,8 @@ def _rgb_to_cmyk_interp_arr(
     cube_base = r_hi * 289 + g_hi * 17 + b_hi
     corner_idx = cube_base[:, None] + _CORNER_OFFSETS
     np.clip(corner_idx, 0, _LUT_ENTRIES - 1, out=corner_idx)
-    corners = lut[corner_idx]
 
-    # Per channel, max accumulator value is 255*255*8 = 520200 — fits int32.
-    accum = (w[:, :, None] * corners).sum(axis=1)
-
-    rounding = (total >> 1)[:, None]
-    cmyk = (accum + rounding) // total[:, None]
+    cmyk = _interp_cmyk(lut[corner_idx], w, total)
 
     is_black = (rgb[:, 0] == 0) & (rgb[:, 1] == 0) & (rgb[:, 2] == 0)
     is_white = (rgb[:, 0] == 255) & (rgb[:, 1] == 255) & (rgb[:, 2] == 255)

@@ -57,7 +57,7 @@ cdef inline void interp_pixel(
     total = w[0]
     if total == 0:
         total = 1
-    base = b_hi * 289 + g_hi * 17 + r_hi
+    base = r_hi * 289 + g_hi * 17 + b_hi
     for ch in range(4):
         acc[ch] = 0
     for k in range(8):

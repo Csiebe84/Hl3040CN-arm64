@@ -32,6 +32,10 @@ def render_band(
     const int[::1] grid,
     const unsigned char[::1] weights,
     const int[::1] black,
+    const unsigned char[::1] gray_lut,
+    const int[::1] gray_grid,
+    const unsigned char[::1] gray_weights,
+    const int[::1] gray_black,
     const unsigned char[:, ::1] thr_k,
     const unsigned char[:, ::1] thr_c,
     const unsigned char[:, ::1] thr_m,
@@ -51,6 +55,9 @@ def render_band(
             `grid` instead.
         grid, weights, black: colour grid, interpolation weights and black
             ink from `color_lut.interp_arrays`; used when `lut` is empty.
+        gray_lut, gray_grid, gray_weights, gray_black: the BRGray=OFF
+            replacement for achromatic pixels (R=G=B), same layout as the
+            `lut`/`grid` pair; empty when no replacement applies.
         thr_k, thr_c, thr_m, thr_y: threshold matrices tiled to >= sw columns.
         lengths: (n, 4) output, encoded length per line and plane (K, C, M, Y);
             0 means the plane line has no ink.
@@ -62,9 +69,11 @@ def render_band(
     cdef Py_ssize_t npx = width if width < sw else sw
     cdef Py_ssize_t bpl = (sw + 7) // 8
     cdef bint has_lut = lut.shape[0] != 0
+    cdef bint has_gray_lut = gray_lut.shape[0] != 0
+    cdef bint has_gray = has_gray_lut or gray_grid.shape[0] != 0
     cdef Py_ssize_t i, j, line, pid, written
     cdef size_t off
-    cdef unsigned char kv, cv, mv, yv, bit
+    cdef unsigned char rv, gv, bv, kv, cv, mv, yv, bit
     cdef unsigned char kcmy[4]
     cdef const unsigned char *row
     cdef const unsigned char *tk
@@ -89,6 +98,12 @@ def render_band(
         raise ValueError("lut must be the flat 256*256*256*4 inverse LUT")
     if not has_lut and (grid.shape[0] != 4913 * 4 or weights.shape[0] != 17 * 289 * 9 or black.shape[0] != 4):
         raise ValueError("without an inverse LUT, grid, weights and black ink are required")
+    if has_gray_lut and gray_lut.shape[0] != _LUT_SIZE:
+        raise ValueError("gray_lut must be the flat 256*256*256*4 inverse LUT")
+    if has_gray and not has_gray_lut and (
+        gray_grid.shape[0] != 4913 * 4 or gray_weights.shape[0] != 17 * 289 * 9 or gray_black.shape[0] != 4
+    ):
+        raise ValueError("gray grid, weights and black ink are required without a gray inverse LUT")
     if (
         min(thr_k.shape[0], thr_c.shape[0], thr_m.shape[0], thr_y.shape[0]) == 0
         or min(thr_k.shape[1], thr_c.shape[1], thr_m.shape[1], thr_y.shape[1]) < npx
@@ -125,14 +140,29 @@ def render_band(
                 ty = &thr_y[line % thr_y.shape[0], 0]
                 memset(planes, 0, 4 * bpl)
                 for j in range(npx):
-                    if has_lut:
-                        off = ((<size_t>row[3 * j] << 16) | (<size_t>row[3 * j + 1] << 8) | row[3 * j + 2]) << 2
+                    rv = row[3 * j]
+                    gv = row[3 * j + 1]
+                    bv = row[3 * j + 2]
+                    off = ((<size_t>rv << 16) | (<size_t>gv << 8) | bv) << 2
+                    if has_gray and rv == gv and bv == gv:
+                        if has_gray_lut:
+                            kv = gray_lut[off]
+                            cv = gray_lut[off + 1]
+                            mv = gray_lut[off + 2]
+                            yv = gray_lut[off + 3]
+                        else:
+                            interp_pixel(&gray_grid[0], &gray_weights[0], &gray_black[0], rv, gv, bv, kcmy)
+                            kv = kcmy[0]
+                            cv = kcmy[1]
+                            mv = kcmy[2]
+                            yv = kcmy[3]
+                    elif has_lut:
                         kv = lut[off]
                         cv = lut[off + 1]
                         mv = lut[off + 2]
                         yv = lut[off + 3]
                     else:
-                        interp_pixel(&grid[0], &weights[0], &black[0], row[3 * j], row[3 * j + 1], row[3 * j + 2], kcmy)
+                        interp_pixel(&grid[0], &weights[0], &black[0], rv, gv, bv, kcmy)
                         kv = kcmy[0]
                         cv = kcmy[1]
                         mv = kcmy[2]

@@ -36,6 +36,10 @@ jobs:
         working-directory: hl3040cn/src
         run: python3 -m unittest test_consistency -v
 
+      - name: Colour-grid selection (BRGray on/off)
+        working-directory: hl3040cn/src
+        run: python3 -m unittest test_gray_replace -v
+
       - name: A4 raster geometry (against Ghostscript)
         working-directory: hl3040cn/src
         run: python3 -m unittest test_a4_geometry -v
