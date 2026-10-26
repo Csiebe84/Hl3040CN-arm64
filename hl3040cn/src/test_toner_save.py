@@ -26,6 +26,7 @@ import dither  # noqa: E402
 import pipeline  # noqa: E402
 from ppm import read_ppm  # noqa: E402
 from settings import PrintSettings  # noqa: E402
+from test_blobs import require_blobs  # noqa: E402
 
 LUT_DIR = Path(__file__).resolve().parent / "lut"
 WIDTH, HEIGHT = 5100, 200
@@ -56,6 +57,7 @@ class TableSelectionTest(unittest.TestCase):
         self.assertEqual(dither._BRCD_SUFFIX[False], "")
         self.assertEqual(dither._BRCD_SUFFIX[True], "-TS")
 
+    @require_blobs(lut=True)
     def test_both_table_sets_load(self):
         """Both sets must exist and carry all four channels."""
         for toner_save in (False, True):
@@ -64,6 +66,7 @@ class TableSelectionTest(unittest.TestCase):
                 self.assertIsNotNone(tables, "the BRCD set did not load")
                 self.assertEqual(set(tables), set("KCMY"))
 
+    @require_blobs(lut=True)
     def test_the_two_sets_differ(self):
         """If -TS equalled the plain set the option would be a no-op."""
         plain = dither.load_brcd_tables(str(LUT_DIR), toner_save=False)
@@ -76,6 +79,7 @@ class TableSelectionTest(unittest.TestCase):
                     hashlib.sha256(saved[channel].threshold_matrix.tobytes()).digest(),
                 )
 
+    @require_blobs(lut=True)
     def test_the_ts_files_are_actually_loaded(self):
         """Reading the files directly must give the same matrices."""
         tables = dither.load_brcd_tables(str(LUT_DIR), toner_save=True)
@@ -84,6 +88,7 @@ class TableSelectionTest(unittest.TestCase):
         self.assertEqual(tables["K"].threshold_matrix.tobytes(), direct.threshold_matrix.tobytes())
 
 
+@require_blobs(lut=True)
 class TonerSaveOutputTest(unittest.TestCase):
     """The option must change the raster, not just the PJL header."""
 

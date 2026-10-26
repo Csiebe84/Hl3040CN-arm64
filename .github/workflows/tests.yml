@@ -32,9 +32,29 @@ jobs:
       - name: Install Ghostscript
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ghostscript
 
+      # lut/ and color_data/ are Brother's proprietary blobs and are not in the
+      # repository (.gitignore), so on a fresh checkout the blob-dependent tests
+      # SKIP. Surface that here so a green run cannot hide an all-skipped suite.
+      - name: Check for Brother blobs
+        working-directory: hl3040cn/src
+        run: |
+          missing=""
+          for d in lut color_data; do
+            [ -d "$d" ] || missing="$missing $d/"
+          done
+          if [ -n "$missing" ]; then
+            echo "::warning::Brother blobs not extracted:$missing — the blob-dependent tests (test_dither_tables, test_gray_replace, test_toner_save) will SKIP, not fail."
+          else
+            echo "Brother blobs present: lut/ color_data/ — all tests run for real."
+          fi
+
       - name: Geometry and consistency tests
         working-directory: hl3040cn/src
         run: python3 -m unittest test_consistency -v
+
+      - name: BRCD dither-table loader
+        working-directory: hl3040cn/src
+        run: python3 -m unittest test_dither_tables -v
 
       - name: Colour-grid selection (BRGray on/off)
         working-directory: hl3040cn/src
@@ -47,6 +67,10 @@ jobs:
       - name: A4 raster geometry (against Ghostscript)
         working-directory: hl3040cn/src
         run: python3 -m unittest test_a4_geometry -v
+
+      - name: Fine mode (BRResolution=Fine)
+        working-directory: hl3040cn/src
+        run: python3 -m unittest test_fine_mode -v
 
       - name: Ghostscript version
         if: always()

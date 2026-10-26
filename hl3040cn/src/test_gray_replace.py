@@ -24,6 +24,7 @@ import color_lut  # noqa: E402
 import pipeline  # noqa: E402
 from ppm import read_ppm  # noqa: E402
 from settings import PrintSettings  # noqa: E402
+from test_blobs import require_blobs  # noqa: E402
 
 WIDTH, HEIGHT = 5100, 200
 
@@ -82,6 +83,7 @@ class GrayReplaceTableTest(unittest.TestCase):
             table = color_lut.ColorTable("rgb", gray_replace=True, variant=variant)
             self.assertEqual(color_lut.gray_replace_table(table), color_lut.ColorTable("cmyk"))
 
+    @require_blobs(color_data=True)
     def test_gray_grid_differs_from_the_profile_grid(self):
         """A replacement that returned the same grid would be a no-op."""
         profile = color_lut.interp_arrays(color_lut.ColorTable("rgb", improve_gray=True))[0]
@@ -100,6 +102,7 @@ class GrayReplaceTableTest(unittest.TestCase):
             self.assertTrue(table.improve_gray, "rgb/srgb always use the *_ig grid")
 
 
+@require_blobs(color_data=True)
 class GrayOutputTest(unittest.TestCase):
     """End-to-end: the setting must change a grey page and not a coloured one."""
 
@@ -148,6 +151,7 @@ class KernelParityTest(unittest.TestCase):
             pipeline.HAS_BAND_KERNEL = original
 
     @unittest.skipUnless(pipeline.HAS_BAND_KERNEL, "Cython band kernel not built")
+    @require_blobs(color_data=True)
     def test_kernel_matches_the_python_path(self):
         """Both renderers must produce identical bytes, grey and colour."""
         for rgb in ((128, 128, 128), (0, 0, 0), (255, 0, 0), (255, 255, 255)):

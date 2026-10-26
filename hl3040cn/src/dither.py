@@ -165,8 +165,8 @@ def dither_load_brcd(path: str) -> DitherChannel:
 _BRCD_PREFIX = {False: "0600", True: "capt"}  # keyed by `fine`
 _BRCD_SUFFIX = {False: "", True: "-TS"}  # keyed by `toner_save`
 # The HL-3040CN ships the cache08 dither set; the HL-4150CDN uses cache09.
-# Both sets sit side by side in the printer's inf/lut directory, and the two
-# are not interchangeable (k/c/m differ, y happens to be identical).
+# The two are not interchangeable: every channel differs, including y
+# (cache08 capt-y is 36874 bytes, cache09 capt-y is 18442).
 _BRCD_CACHE = "cache08"
 
 

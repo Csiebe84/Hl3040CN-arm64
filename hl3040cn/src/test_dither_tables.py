@@ -11,6 +11,7 @@ import unittest
 from pathlib import Path
 
 import dither
+from test_blobs import require_blobs
 
 LUT_DIR = Path(__file__).resolve().parent / "lut"
 EXPECTED = {"k": (80, 80), "c": (80, 80), "m": (80, 80), "y": (24, 24)}
@@ -20,6 +21,7 @@ class BrcdNamingTest(unittest.TestCase):
     def test_cache_suffix_is_cache08(self):
         self.assertEqual(dither._BRCD_CACHE, "cache08")
 
+    @require_blobs(lut=True)
     def test_built_paths_exist(self):
         for ch in "k c m y".split():
             p = LUT_DIR / f"0600-{ch}_{dither._BRCD_CACHE}.bin"
@@ -36,6 +38,7 @@ class BrcdNamingTest(unittest.TestCase):
         self.assertEqual(code, [], f"cache09 still in code: {code}")
 
 
+@require_blobs(lut=True)
 class BrcdLoadTest(unittest.TestCase):
     def test_normal_tables_load_with_real_geometry(self):
         t = dither.load_dither_tables(str(LUT_DIR), fine=False, toner_save=False)
@@ -60,6 +63,7 @@ class BrcdLoadTest(unittest.TestCase):
         self.assertNotEqual((t["Y"].width, t["Y"].height), (t["K"].width, t["K"].height))
 
 
+@require_blobs(lut=True)
 class BrcdHeaderTest(unittest.TestCase):
     def test_headers_agree_with_loader(self):
         for ch, (w, h) in EXPECTED.items():

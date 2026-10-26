@@ -311,12 +311,17 @@ def get_image_dimensions(page_size: str) -> tuple[int, int]:
 def get_image_dimensions_fine(page_size: str) -> tuple[int, int]:
     """Return (source_width, source_height) for Fine mode BeginImage.
 
-    Fine mode uses the raw paper width without 32-pixel rounding
-    (A4: 4760, not 4768). Height is the same as Normal.
-    Verified from captures: Fine A4 = (4760, 6808).
+    Width = paper_width rounded up to 8-pixel boundary; height see
+    `image_height`. Fine mode packs four bits per pixel, so the boundary is
+    the 4-bit alignment (8 px = one byte), not Normal's 32 px.
+
+    Measured against the filter for Letter (5100 -> 5104), A4 (4958 -> 4960),
+    A5 (3500 -> 3504), Executive (4350 -> 4352) and unchanged for EnvDL
+    (2600), Br3x5 (1800) and EnvPRC5Rotated (5200), which are already
+    8-aligned.
     """
     pw, _ = PAPER_SIZES[page_size]
-    return pw, image_height(page_size)
+    return (pw + 7) & ~7, image_height(page_size)
 
 
 # ---------------------------------------------------------------------------
