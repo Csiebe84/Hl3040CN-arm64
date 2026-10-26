@@ -17,8 +17,10 @@
 #   ./publish.sh --owner someone      # push under another account
 #   ./publish.sh --check              # only report, change nothing
 #
-# The token is read from $GITHUB_TOKEN, or from ~/.gh_token, and is never
-# written into .git/config or the shell history.
+# The token is read from ~/.gh_token (the classic token that owns this
+# repository), falling back to $GITHUB_TOKEN, and is never written into
+# .git/config or the shell history. Note that $GITHUB_TOKEN on this machine
+# belongs to a different account and cannot push here.
 #
 set -uo pipefail
 
@@ -43,12 +45,16 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- Token -------------------------------------------------------------------
-TOKEN="${GITHUB_TOKEN:-}"
-if [[ -z "$TOKEN" && -f "$HOME/.gh_token" ]]; then
-    TOKEN="$(tr -d ' \t\r\n' < "$HOME/.gh_token")"
+TOKEN_FILE="${TOKEN_FILE:-${HOME:-/root}/.gh_token}"
+TOKEN=""
+if [[ -f "$TOKEN_FILE" ]]; then
+    TOKEN="$(tr -d ' \t\r\n' < "$TOKEN_FILE")"
 fi
 if [[ -z "$TOKEN" ]]; then
-    printf 'Error: no token. Set GITHUB_TOKEN or write one to ~/.gh_token\n' >&2
+    TOKEN="${GITHUB_TOKEN:-}"
+fi
+if [[ -z "$TOKEN" ]]; then
+    printf 'Error: no token. Write one to %s or set GITHUB_TOKEN\n' "$TOKEN_FILE" >&2
     exit 1
 fi
 
@@ -154,8 +160,25 @@ fi
 git remote set-url origin "https://github.com/$OWNER/$REPO_NAME.git" 2>/dev/null \
     || git remote add origin "https://github.com/$OWNER/$REPO_NAME.git"
 
+# Feed the token through GIT_ASKPASS rather than a URL: a token in the push
+# URL is visible in `ps` to every user on the machine, and git would also
+# write it into .git/config.
+ASKPASS="$(mktemp)"
+trap 'rm -f "$ASKPASS"' EXIT
+cat > "$ASKPASS" <<HELPER
+#!/bin/sh
+case "\$1" in
+    *Username*) echo "x-access-token" ;;
+    *)          printf '%s' "$TOKEN" ;;
+esac
+HELPER
+chmod 700 "$ASKPASS"
+
 printf 'Pushing master ...\n'
-if ! git push "https://$TOKEN@github.com/$OWNER/$REPO_NAME.git" master:master 2>&1 | grep -v "$TOKEN"; then
+# -c credential.helper= clears the system helper, which on this machine
+# hands git a token for a different account.
+if ! GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 \
+     git -c credential.helper= push origin master:master; then
     printf 'Error: push failed.\n' >&2
     exit 1
 fi
