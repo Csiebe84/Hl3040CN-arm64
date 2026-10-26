@@ -7,6 +7,7 @@ a temporary rc into the container and pushes a PPM through the filter, so the
 grid naming can be pinned by varying one setting at a time.
 
 Usage: oracle_run.py <ppm> <out.xl2hb> [--matching Normal|Vivid|None] [--gray ON|OFF]
+                               [--resolution Normal|Fine]
 """
 from __future__ import annotations
 
@@ -19,9 +20,9 @@ PRINTER = "/opt/brother/Printers/hl3040cn"
 FILTER = f"{PRINTER}/lpd/brhl3040cnfilter"
 RC_TEMPLATE = """[HL3040CN]
 MediaType={media}
-PageSize=Letter
+PageSize={page}
 InputSlot=AutoSelect
-BRResolution=Normal
+BRResolution={resolution}
 Copies=1
 BRReverse=OFF
 BRMonoColor=Auto
@@ -43,7 +44,7 @@ Language=us
 def main() -> int:
     """Run the filter with the requested settings and store its output."""
     args = sys.argv[1:]
-    opts = {"matching": "Normal", "gray": "ON", "toner": "OFF", "media": "Plain", "enhance": "OFF"}
+    opts = {"matching": "Normal", "gray": "ON", "toner": "OFF", "media": "Plain", "enhance": "OFF", "resolution": "Normal", "page": "Letter"}
     for key in opts:
         flag = f"--{key}"
         if flag in args:

@@ -58,7 +58,9 @@ class ColorTable:
     Attributes:
         profile: `rgb` for Normal colour matching, `srgb` for Vivid, `cmyk`
             for colour matching None.
-        improve_gray: the ImpGray=ON grids (BRGray).
+        improve_gray: selects the ImpGray=ON grid (BRGray=ON); False selects
+            the ImpGray=OFF grid (BRGray=OFF). The choice is per page, not per
+            pixel: every pixel, grey or not, goes through the selected grid.
         variant: `density2` with toner save, `glossy` for glossy media.
         rich_black: pure black takes grid entry 0 (C, M, Y and K) instead of
             K only; the original does this with BREnhanceBlkPrt in the
@@ -69,7 +71,6 @@ class ColorTable:
     improve_gray: bool = False
     variant: Variant = "default"
     rich_black: bool = False
-    gray_replace: bool = True
 
     @property
     def name(self) -> str:
@@ -79,33 +80,15 @@ class ColorTable:
 
 DEFAULT_TABLE = ColorTable()
 
-# Tables with a precomputed inverse LUT (install.sh writes both); every
-# other table is interpolated per pixel.
-INVERSE_LUT_TABLES: tuple[ColorTable, ...] = (ColorTable("rgb"), ColorTable("srgb"))
-
-# With BRGray off (ImpGray=OFF) the oracle separates achromatic pixels
-# (R=G=B) through the cmyk grid instead of the profile grid, per pixel: a
-# sheet that is half grey and half red uses cmyk for the grey and the profile
-# grid for the red, so the choice is per pixel, not per page. With BRGray on
-# the profile grid alone is used. The port previously applied one grid to the
-# whole page, which is why every grey page (e.g. `grey 50%` in compare.py)
-# diverged.
-_GRAY_REPLACE_TABLE = ColorTable("cmyk")
-
-
-def gray_replace_table(table: ColorTable = DEFAULT_TABLE) -> ColorTable | None:
-    """Grid the oracle uses for achromatic pixels, or None when there is none.
-
-    BRGray=ON (`improve_gray`) keeps the profile grid for grey too; BRGray=OFF
-    routes R=G=B pixels through the cmyk grid. The cmyk profile is its own
-    replacement (a no-op), so `None` colour matching is unaffected.
-
-    Returns:
-        The replacement grid, or None if no per-pixel replacement applies.
-    """
-    if not table.gray_replace or table.profile == "cmyk":
-        return None
-    return _GRAY_REPLACE_TABLE
+# Tables with a precomputed inverse LUT (install.sh writes them); every
+# other table is interpolated per pixel. BRGray's ON/OFF grids are distinct
+# tables, so each needs its own cache file.
+INVERSE_LUT_TABLES: tuple[ColorTable, ...] = (
+    ColorTable("rgb"),
+    ColorTable("rgb", improve_gray=True),
+    ColorTable("srgb"),
+    ColorTable("srgb", improve_gray=True),
+)
 
 
 def _load_lut(table: ColorTable = DEFAULT_TABLE) -> npt.NDArray[np.int32]:
@@ -226,14 +209,14 @@ def inverse_lut_path(table: ColorTable = DEFAULT_TABLE) -> Path | None:
     """Where the inverse LUT of `table` is installed, next to `INVERSE_LUT_PATH`.
 
     Returns:
-        `INVERSE_LUT_PATH` for the rgb default table, a sibling file for the
-        srgb one, None for tables without a precomputed inverse LUT.
+        `INVERSE_LUT_PATH` for the rgb default table, a sibling file keyed by
+        profile and the BRGray grid for the others, None for tables without a
+        precomputed inverse LUT.
     """
     if table not in INVERSE_LUT_TABLES:
         return None
-    if table.profile == "rgb":
-        return INVERSE_LUT_PATH
-    return INVERSE_LUT_PATH.with_name(f"inverse_lut_{table.profile}.npy")
+    suffix = "" if table == ColorTable("rgb") else f"_{table.profile}{'_ig' if table.improve_gray else ''}"
+    return INVERSE_LUT_PATH.with_name(f"inverse_lut{suffix}.npy")
 
 
 @functools.lru_cache(maxsize=len(INVERSE_LUT_TABLES))
@@ -313,21 +296,12 @@ def rgb_to_cmyk_lut_arr(
 ) -> tuple[_NDArrayU8, _NDArrayU8, _NDArrayU8, _NDArrayU8]:
     """Like :func:`rgb_to_cmyk_lut` but returns ndarrays directly.
 
-    Lets callers in the hot path avoid a bytes→ndarray roundtrip. When BRGray
-    is off, achromatic pixels are re-gathered through the replacement grid
-    (`gray_replace_table`).
+    Lets callers in the hot path avoid a bytes→ndarray roundtrip.
 
     Returns:
         (k, c, m, y) uint8 arrays of length `width`.
     """
     planes = _gather_planes(rgb_row, width, table)
-    replacement = gray_replace_table(table)
-    if replacement is not None:
-        rgb = np.frombuffer(rgb_row, dtype=np.uint8, count=width * 3).reshape(width, 3)
-        achromatic = (rgb[:, 0] == rgb[:, 1]) & (rgb[:, 1] == rgb[:, 2])
-        if np.any(achromatic):
-            repl = _gather_planes(rgb_row, width, replacement)
-            planes[:, achromatic] = repl[:, achromatic]
     return planes[0], planes[1], planes[2], planes[3]
 
 

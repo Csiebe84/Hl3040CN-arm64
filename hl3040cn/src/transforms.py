@@ -5,8 +5,8 @@
   per-channel input remap.
 * :func:`color_table` picks the colour grid the original driver would use
   for the settings; :func:`color_lut.rgb_to_cmyk_lut_arr` separates RGB
-  into CMYK through it. Colour matching, BRGray, toner save, glossy media and
-  BREnhanceBlkPrt only choose the grid; they do not touch the pixels.
+  into CMYK through it. Colour matching and BRGray only choose the grid;
+  they do not touch the pixels.
 """
 
 import _compat  # noqa: F401  (Buffer on Python < 3.12)
@@ -30,11 +30,11 @@ _PROFILES: dict[ColorMatching, Profile] = {
 def color_table(settings: PrintSettings) -> ColorTable:
     """The colour grid `lookup_color_transform_table` selects for `settings`.
 
-    Measured against the oracle (six primaries and R/G/B/grey ramps): the
-    chromatic grid depends only on the colour matching. Normal always uses the
-    rgb improve-gray grid, Vivid the srgb improve-gray grid, and None the cmyk
-    grid; BRGray, toner save and the media type do not change it. BRGray off
-    only adds the per-pixel achromatic replacement (`gray_replace`). Rich black
+    Measured against the oracle: colour matching and BRGray are both whole-page
+    grid selectors, independent of the pixel data. Normal uses the rgb grids,
+    Vivid the srgb grids, and None the cmyk grids; BRGray=ON picks the
+    ImpGray=ON grid (`improve_gray=True`), BRGray=OFF the ImpGray=OFF grid.
+    Every pixel, grey or not, goes through the selected grid. Rich black
     (BREnhanceBlkPrt) takes grid entry 0 for pure black in the rgb/srgb
     profiles.
 
@@ -42,13 +42,13 @@ def color_table(settings: PrintSettings) -> ColorTable:
         The table for the colour separation.
     """
     profile = _PROFILES[settings.color_matching]
-    if profile == "cmyk":
-        return ColorTable(profile=profile, improve_gray=settings.improve_gray)
+    # Rich black applies only to the rgb/srgb profiles (BREnhanceBlkPrt,
+    # `lut_selection` 0); colour matching None is left on the plain grid.
+    rich_black = settings.enhance_black and profile != "cmyk"
     return ColorTable(
         profile=profile,
-        improve_gray=True,
-        rich_black=settings.enhance_black,
-        gray_replace=not settings.improve_gray,
+        improve_gray=settings.improve_gray,
+        rich_black=rich_black,
     )
 
 

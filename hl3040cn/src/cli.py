@@ -6,7 +6,7 @@ import sys
 import time
 from pathlib import Path
 
-from color_lut import INVERSE_LUT_PATH, INVERSE_LUT_TABLES, write_inverse_lut
+from color_lut import INVERSE_LUT_PATH, INVERSE_LUT_TABLES, ColorTable, write_inverse_lut
 from pipeline import filter_page
 from ppm import read_ppm
 from settings import DuplexMode, MonoColor, PageSize, PrintSettings, Resolution
@@ -46,7 +46,9 @@ def main() -> None:
         )
         base = Path(args.precompute_lut)
         for table in INVERSE_LUT_TABLES:
-            suffix = "" if table.profile == "rgb" else f"_{table.profile}"
+            # Match inverse_lut_path's naming: the plain rgb table keeps the
+            # given name; every other table gets a profile/grid suffix.
+            suffix = "" if table == ColorTable("rgb") else f"_{table.profile}{'_ig' if table.improve_gray else ''}"
             target = base.with_name(f"{base.stem}{suffix}{base.suffix}")
             logger.info("Precomputing %s inverse LUT to %s ...", table.name, target)
             t0 = time.perf_counter()

@@ -4,6 +4,11 @@
 Extends compare.py: several grey levels, a mixed grey/red page, BRGray on/off,
 Vivid and None colour matching, and a few 50% colours. Reports byte-identity
 per case so a regression in any setting is visible.
+
+The last four cases are deliberately sensitive to the BRGray grid choice: near
+greys and a saturated colour whose ImpGray=ON and ImpGray=OFF grids differ. A
+regression that reverts BRGray to a per-pixel achromatic rule passes the pure
+greys but fails these.
 """
 from __future__ import annotations
 
@@ -46,6 +51,10 @@ CASES = [
     ("dark grey bar", bar((64, 64, 64), 1000, 1300)),
     ("red 50%", solid((128, 0, 0))),
     ("cyan 50%", solid((0, 128, 128))),
+    ("near-grey light", solid((200, 190, 180))),
+    ("near-grey mid", solid((100, 84, 84))),
+    ("near-grey warm", solid((128, 128, 120))),
+    ("saturated green", solid((100, 200, 50))),
 ]
 
 

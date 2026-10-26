@@ -30,23 +30,30 @@ FILTER = WORK / "ref" / "brhl3040cnfilter.bin"
 LUT_DIR = SRC / "lut"
 COLOR_DATA = SRC / "color_data"
 
-# Grids located in the filter binary.  The first three are byte-identical to
-# the HL-4150CDN's colour-matching-None grids, which is what fixes their
-# meaning; the rest are 3040-specific and are named by position until the
-# colour oracle pins their profile.
+# Grids located in the filter binary.  The binary carries an ImpGray=ON and
+# an ImpGray=OFF table set for every colour matching (the table headers read
+# "HL-30xxC 600dpi ImpGray=ON/OFF ... Match Monitor/Vivid").  BRGray is a
+# whole-page grid selector, so the port needs both sets: the `_ig` names are
+# the ImpGray=ON (BRGray=ON) grids, the plain names the ImpGray=OFF
+# (BRGray=OFF) grids.  These six are the 600dpi tables the filter uses at the
+# driver's Normal resolution; the offsets are the table data (the byte after
+# each header string).
+#
+# The remaining entries are media-type variants used only by the exploratory
+# tools; their offsets are best-effort and may overlap the ones above.
 GRIDS = {
-    "cmyk_ig_default": 0x47340,
-    "cmyk_default": 0x2A541,
-    "srgb_ig_default": 0x9E25C,
+    "cmyk_ig_default": 0x47340,   # None,  ImpGray=ON
+    "cmyk_default": 0x2A541,      # None,  ImpGray=OFF
+    "srgb_ig_default": 0xC4A36,   # Vivid, ImpGray=ON
+    "srgb_default": 0x8AE97,      # Vivid, ImpGray=OFF
+    "rgb_ig_default": 0xA7C5E,    # Normal, ImpGray=ON
+    "rgb_default": 0x6E0BF,       # Normal, ImpGray=OFF
     "srgb_ig_density2": 0xA7C5E,
     "srgb_ig_glossy": 0xBB054,
-    "rgb_ig_default": 0xC4A36,
     "rgb_ig_density2": 0x646BB,
     "rgb_ig_glossy": 0x6E0BD,
-    "rgb_default": 0x814B3,
     "rgb_density2": 0x8AE95,
     "rgb_glossy": 0x94875,
-    "srgb_default": 0xBB06E,
     "srgb_density2": 0xC4A4E,
     "srgb_glossy": 0xCE466,
 }
