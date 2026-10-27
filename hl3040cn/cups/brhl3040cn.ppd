@@ -163,10 +163,27 @@
 *%==== Resolution Features =================================
 *OpenUI *BRResolution/Print Quality: PickOne
 *OrderDependency: 14 AnySetup *BRResolution
-*DefaultBRResolution: 600dpi
+*DefaultBRResolution: 600x2400dpi
 *BRResolution 600dpi/Normal (600 x 600dpi): 	"          "
 *BRResolution 600x2400dpi/Fine (2400 dpi class): 	"          "
 *CloseUI: *BRResolution
+
+*%==== Standard IPP print quality (driverless: Mopria, AirPrint, Windows) ===
+*OpenUI *cupsPrintQuality/Print Quality: PickOne
+*OrderDependency: 13 AnySetup *cupsPrintQuality
+*DefaultcupsPrintQuality: High
+*cupsPrintQuality Draft/Draft (fast): 	"          "
+*cupsPrintQuality Normal/Normal (600 x 600dpi): 	"          "
+*cupsPrintQuality High/Fine (2400 dpi class): 	"          "
+*CloseUI: *cupsPrintQuality
+
+*OpenUI *Resolution/Output Resolution: PickOne
+*OrderDependency: 13 AnySetup *Resolution
+*DefaultResolution: 600x2400dpi
+*Resolution 600dpi/Normal (600 x 600dpi): 	"          "
+*Resolution 600x2400dpi/Fine (2400 dpi class): 	"          "
+*CloseUI: *Resolution
+
 
 *%=== MonoOrColor ================================
 *OpenUI *BRMonoColor/Color / Mono: PickOne

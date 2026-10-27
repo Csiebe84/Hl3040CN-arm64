@@ -65,17 +65,24 @@ class ColorTable:
         rich_black: pure black takes grid entry 0 (C, M, Y and K) instead of
             K only; the original does this with BREnhanceBlkPrt in the
             rgb/srgb profiles (`lut_selection` 0 in `load_color_profile`).
+        capt: selects the `CAPT` (2400 dpi class) separation grid, which the
+            filter uses for BRResolution=Fine. It is a distinct grid, not a
+            reuse of the 600 dpi one: at mid grey the 600 dpi grid carries a
+            black component (K=15 at RGB 128) while CAPT drops it to K=0,
+            which is what makes the oracle's Fine output omit the K plane.
     """
 
     profile: Profile = "rgb"
     improve_gray: bool = False
     variant: Variant = "default"
     rich_black: bool = False
+    capt: bool = False
 
     @property
     def name(self) -> str:
         """Blob name stem, e.g. `rgb_ig_density2` for `rgb_ig_density2_lut.bin`."""
-        return f"{self.profile}{'_ig' if self.improve_gray else ''}_{self.variant}"
+        stem = f"{self.profile}{'_ig' if self.improve_gray else ''}"
+        return f"{stem}_capt" if self.capt else f"{stem}_{self.variant}"
 
 
 DEFAULT_TABLE = ColorTable()

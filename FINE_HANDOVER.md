@@ -368,3 +368,54 @@ the Fine-specific colour path.
 * RAM is tight (≈45 MB free). Run one oracle job at a time. For header checks
   a 200x100 probe is fine, but for anything about block structure or encoder
   output the probe **must be full-width** (5100 px) — see section 5.
+
+## 7. Ink-level measurements (recorded, not chased here)
+
+These were measured today with the cheap tests (no qemu, oracle files already
+in `/mnt/ssd/finecmp`) and are recorded so the ink-level work has them. They
+are **not** solved here; see `TASK_FINE_INKLEVELS.md` for that hunt.
+
+### 7a. The port's per-plane stage-2 bytes do not match the oracle
+
+Full-page gray 128 (Letter, Fine), raw entry bytes summed over **all** entries,
+via `band.decode_blocks(pclxl.parse(session))` (entry length = the stage-2
+payload size):
+
+```
+plane | oracle | port
+  C   | 4212118 | 3769706
+  M   |   66297 | 3769703   (oracle has only 4 M blocks; port has 6564)
+  Y   |  537154 | 1891526
+```
+
+Oracle blocks per plane: `{C: 157, Y: 22, M: 4}` (K absent). The oracle is
+strongly C-dominant and nearly M-free; the port spreads ink evenly over C/M/Y.
+
+### 7b. `_FINE_BINARY` is between the two, not the answer
+
+`dither.py` carries an **uncommitted** `_FINE_BINARY = True` that switches Fine
+to a 2-level screen (`np.where(ink > thresholds, 15, 0)`). On the C plane,
+gray 128, one 5100-px row through `fine_encoder.compress_rle_preencode`:
+
+```
+binary 0/15 ->  831 B  (2f80278027802780)
+16 levels   -> 2550 B  (51515a5a51515a5a)
+ORACLE      -> 1020 B  (c812c812c812c812)
+```
+
+The oracle sits **between** the two and is 2-byte periodic with mixed-nibble
+tokens (`0xC8`,`0x12` are stage-1 mixed-byte codes, not 0/15 nibbles). A brute
+force over all constant nibble patterns, period 1..4, found **no** pattern
+producing `c812` through `compress_rle_preencode`. So the oracle's 4 bpp levels
+are **not** a level function of a single constant ink value. State it; do not
+try to solve it here. (`_FINE_BINARY` is in any case only a partial improvement
+— C drops from 2550 B to 831 B per row, oracle 1020 B — so it is not the
+answer, and it must stay unstaged while the ink-level conversation edits the
+Fine dither path.)
+
+### 7c. Measurement trap
+
+Decoding only `entries[0]` of the first block understates a plane by ~7000x.
+**Always sum over all entries.** (The retracted 1020-byte "oracle C stream is a
+2-byte periodic pattern" claim came from that mistake — see 7b for what is
+actually true of a single row.)

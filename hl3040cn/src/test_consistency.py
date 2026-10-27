@@ -22,7 +22,7 @@ from pathlib import Path
 
 import settings
 import xl2hb
-from settings import InputSlot, MediaType, PageSize
+from settings import InputSlot, MediaType, PageSize, PrintSettings, Resolution
 
 ROOT = Path(__file__).resolve().parent.parent
 PPD = ROOT / "cups" / "brhl3040cn.ppd"
@@ -200,11 +200,67 @@ class FilterOptionsTest(unittest.TestCase):
     def test_ppd_options_are_known_to_the_filter(self):
         groups = re.findall(r"^\*OpenUI \*([A-Za-z]+)/", PPD.read_text(encoding="latin-1"), re.M)
         # PageSize/PageRegion are page geometry, handled by name, not options.
+        # cupsPrintQuality/Resolution are standard IPP job attributes that CUPS
+        # hands to the filter verbatim, so they need no name in the sources.
+        standard = ("PageSize", "PageRegion", "cupsPrintQuality", "Resolution")
         unknown = [
             g for g in groups
-            if g not in ("PageSize", "PageRegion") and g not in self.sources
+            if g not in standard and g not in self.sources
         ]
         self.assertEqual(unknown, [], f"PPD options the filter ignores: {unknown}")
+
+    def test_ppd_exposes_standard_quality_options(self):
+        """Driverless clients can only select quality via standard IPP attributes."""
+        text = PPD.read_text(encoding="latin-1")
+        self.assertIn("*OpenUI *cupsPrintQuality/", text)
+        self.assertIn("*OpenUI *Resolution/", text)
+        self.assertIn("*cupsPrintQuality High/", text)
+        self.assertIn("*Resolution 600x2400dpi/", text)
+
+
+class StandardQualityMappingTest(unittest.TestCase):
+    """A driverless job's quality attribute must reach Fine, not just Normal."""
+
+    def test_print_quality_maps_to_resolution(self):
+        # IPP print-quality: 3=draft, 4=normal, 5=high.
+        for value, expected in (("3", Resolution.NORMAL), ("4", Resolution.NORMAL), ("5", Resolution.FINE)):
+            s = PrintSettings.from_cups_options(f"print-quality={value}", 1, {})
+            self.assertEqual(s.resolution, expected, f"print-quality={value}")
+
+    def test_cups_print_quality_maps_to_resolution(self):
+        for value, expected in (("Draft", Resolution.NORMAL), ("Normal", Resolution.NORMAL), ("High", Resolution.FINE)):
+            s = PrintSettings.from_cups_options(f"cupsPrintQuality={value}", 1, {})
+            self.assertEqual(s.resolution, expected, f"cupsPrintQuality={value}")
+
+    def test_printer_resolution_maps_to_resolution(self):
+        self.assertEqual(
+            PrintSettings.from_cups_options("Resolution=600x2400dpi", 1, {}).resolution, Resolution.FINE
+        )
+        self.assertEqual(
+            PrintSettings.from_cups_options("Resolution=600dpi", 1, {}).resolution, Resolution.NORMAL
+        )
+
+    def test_ipp_printer_resolution_maps_to_resolution(self):
+        # CUPS passes the raw IPP attribute through as "printer-resolution".
+        self.assertEqual(
+            PrintSettings.from_cups_options("printer-resolution=600x2400dpi", 1, {}).resolution, Resolution.FINE
+        )
+        self.assertEqual(
+            PrintSettings.from_cups_options("printer-resolution=600dpi", 1, {}).resolution, Resolution.NORMAL
+        )
+
+    def test_quality_beats_incidental_resolution(self):
+        # A driverless client may send a resolution next to the quality it chose.
+        s = PrintSettings.from_cups_options(
+            "print-quality=5 cupsPrintQuality=High printer-resolution=600dpi", 1, {}
+        )
+        self.assertEqual(s.resolution, Resolution.FINE)
+
+    def test_brother_option_wins_over_standard(self):
+        s = PrintSettings.from_cups_options("print-quality=5 BRResolution=600dpi", 1, {})
+        self.assertEqual(s.resolution, Resolution.NORMAL)
+        s = PrintSettings.from_cups_options("print-quality=4 BRResolution=600x2400dpi", 1, {})
+        self.assertEqual(s.resolution, Resolution.FINE)
 
 
 if __name__ == "__main__":

@@ -170,9 +170,14 @@ echo ""
 if $ADD_PRINTER; then
     PRINTER_URI="${PRINTER_URI:-$DEFAULT_URI}"
     echo "Creating queue '$QUEUE_NAME' -> $PRINTER_URI"
+    # print-quality-default=5 (high) makes Fine the default the queue
+    # advertises over IPP. The PPD's *DefaultcupsPrintQuality does NOT drive
+    # this attribute (CUPS keeps it at "normal"), so driverless clients
+    # (Android/Mopria, Windows, AirPrint) would otherwise pre-select Normal.
     lpadmin -p "$QUEUE_NAME" -E \
         -v "$PRINTER_URI" \
         -P "$CUPS_PPD_DIR/brhl3040cn.ppd" \
+        -o print-quality-default=5 \
         -D "Brother HL-3040CN (Open Source)" \
         -L "Network Printer"
     echo "  Queue created."
@@ -181,5 +186,6 @@ else
     echo "  sudo $0 --add-printer"
     echo "or manually:"
     echo "  sudo lpadmin -p $QUEUE_NAME -E -v $DEFAULT_URI \\"
-    echo "    -P $CUPS_PPD_DIR/brhl3040cn.ppd -D 'Brother HL-3040CN (Open Source)'"
+    echo "    -P $CUPS_PPD_DIR/brhl3040cn.ppd -o print-quality-default=5 \\"
+    echo "    -D 'Brother HL-3040CN (Open Source)'"
 fi

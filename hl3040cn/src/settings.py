@@ -93,6 +93,33 @@ class Resolution(StrEnum):
     FINE = "Fine"
 
 
+# A resolution option value that is not "600dpi" is the 2400-dpi-class Fine
+# mode; the PPD and Brother's filter only ever use those two spellings.
+_FINE_DPI = "600x2400dpi"
+
+# IPP print-quality enum values (RFC 8011: 3=draft, 4=normal, 5=high) and the
+# cupsPrintQuality names CUPS maps them to. Both spell Fine as "high".
+_QUALITY_TO_RESOLUTION = {
+    "Draft": Resolution.NORMAL,
+    "Normal": Resolution.NORMAL,
+    "High": Resolution.FINE,
+}
+_PRINT_QUALITY_TO_RESOLUTION = {
+    "3": Resolution.NORMAL,
+    "4": Resolution.NORMAL,
+    "5": Resolution.FINE,
+}
+
+
+def _resolution_from_dpi(value: str) -> Resolution:
+    """Map a printer-resolution value to a Resolution.
+
+    Returns:
+        FINE for the 2400-dpi-class value, NORMAL for anything else.
+    """
+    return Resolution.FINE if value == _FINE_DPI else Resolution.NORMAL
+
+
 class DuplexMode(StrEnum):
     """Duplex printing mode (maps to XL2HB DuplexPageMode attribute)."""
 
@@ -145,7 +172,9 @@ class PrintSettings:
     media_type: MediaType = MediaType.PLAIN
     page_size: PageSize = PageSize.A4
     input_slot: InputSlot = InputSlot.AUTO
-    resolution: Resolution = Resolution.NORMAL
+    # Fine by default: IPP/AirPrint clients cannot select BRResolution,
+    # so this is the only quality level they ever see.
+    resolution: Resolution = Resolution.FINE
     copies: int = 1
     duplex: DuplexMode = DuplexMode.NONE
     mono_color: MonoColor = MonoColor.AUTO
@@ -250,9 +279,39 @@ class PrintSettings:
             else:
                 settings.duplex = sides
 
-        # Resolution: "600x2400dpi" -> Fine, else Normal
-        if "BRResolution" in opts:
-            settings.resolution = Resolution.FINE if opts["BRResolution"] == "600x2400dpi" else Resolution.NORMAL
+        # Resolution: the job's own option wins, then the PPD default.
+        #   BRResolution    - Brother-native option; only PPD-aware clients send it.
+        #   cupsPrintQuality- CUPS's translation of IPP "print-quality"; present
+        #                     only because the PPD defines *cupsPrintQuality.
+        #   print-quality   - raw IPP numeric value (3=draft, 4=normal, 5=high).
+        #   Resolution      - standard IPP "printer-resolution" as the PPD spells
+        #                     it, e.g. when a PPD default applies.
+        #   printer-resolution - the same IPP attribute passed through verbatim
+        #                     when a driverless client sets it directly.
+        # Both come last because a driverless client may send a resolution
+        # alongside the quality it actually selected, and that choice must win.
+        # Driverless clients (Android/Mopria, Windows, AirPrint) never send
+        # BRResolution, so the standard attributes are what give them quality.
+        # The job's options are evaluated before the PPD defaults: the PPD
+        # supplies a BRResolution default, which would otherwise mask the
+        # standard attribute the client actually chose.
+        def _resolution_from(source: Mapping[str, str]) -> Resolution | None:
+            for key, table in (
+                ("BRResolution", None),
+                ("cupsPrintQuality", _QUALITY_TO_RESOLUTION),
+                ("print-quality", _PRINT_QUALITY_TO_RESOLUTION),
+                ("Resolution", None),
+                ("printer-resolution", None),
+            ):
+                if key in source:
+                    return _resolution_from_dpi(source[key]) if table is None else table.get(source[key])
+            return None
+
+        resolution = _resolution_from(job_opts)
+        if resolution is None:
+            resolution = _resolution_from(ppd_defaults or {})
+        if resolution is not None:
+            settings.resolution = resolution
 
         # Boolean options (ON/OFF)
         bool_map: dict[str, str] = {

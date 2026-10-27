@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dither  # noqa: E402
 import pipeline  # noqa: E402
 from ppm import read_ppm  # noqa: E402
-from settings import PrintSettings  # noqa: E402
+from settings import PrintSettings, Resolution  # noqa: E402
 from test_blobs import require_blobs  # noqa: E402
 
 LUT_DIR = Path(__file__).resolve().parent / "lut"
@@ -33,13 +33,21 @@ WIDTH, HEIGHT = 5100, 200
 
 
 def render(rgb: tuple[int, int, int], *, toner_save: bool) -> bytes:
-    """Filter one solid page and return the XL2HB session bytes."""
+    """Filter one solid page and return the XL2HB session bytes.
+
+    Pins Normal resolution explicitly. The `-TS` tables describe the Normal
+    dither, and the assertion below is the Normal-mode behaviour the oracle
+    shows; Fine is a separate, still-open defect (see FINE_HANDOVER.md). Relying
+    on the class default would silently retarget these tests whenever that
+    default changes.
+    """
     header = b"P6\n%d %d\n255\n" % (WIDTH, HEIGHT)
     parsed = read_ppm(io.BytesIO(header + bytes(rgb) * WIDTH * HEIGHT))
     assert parsed is not None
     width, height, _maxval, pixels = parsed
     settings = PrintSettings()
     settings.page_size = "Letter"
+    settings.resolution = Resolution.NORMAL
     settings.toner_save = toner_save
     out = io.BytesIO()
     pipeline.filter_page(width, height, pixels, settings, out)

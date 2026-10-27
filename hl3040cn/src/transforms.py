@@ -16,7 +16,7 @@ import numpy as np
 import numpy.typing as npt
 
 from color_lut import ColorTable, Profile
-from settings import ColorMatching, PrintSettings
+from settings import ColorMatching, PrintSettings, Resolution
 
 _NDArrayU8 = npt.NDArray[np.uint8]
 
@@ -45,10 +45,15 @@ def color_table(settings: PrintSettings) -> ColorTable:
     # Rich black applies only to the rgb/srgb profiles (BREnhanceBlkPrt,
     # `lut_selection` 0); colour matching None is left on the plain grid.
     rich_black = settings.enhance_black and profile != "cmyk"
+    # BRResolution=Fine selects the CAPT (2400 dpi class) separation grid.
+    # The filter ships a distinct grid per profile/ImpGray for it; reusing the
+    # 600 dpi grid leaves a black component on mid greys the oracle drops.
+    capt = settings.resolution == Resolution.FINE and profile != "cmyk"
     return ColorTable(
         profile=profile,
         improve_gray=settings.improve_gray,
         rich_black=rich_black,
+        capt=capt,
     )
 
 
