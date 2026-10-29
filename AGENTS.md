@@ -153,3 +153,27 @@ Brother-Blobs sind gitignored), also skip. **Ein kompiliertes Artefakt, das
 neuer ist als seine Quelle, ist ein Warnsignal**; `install.sh` baut mit `--force`
 genau deshalb, aber eine von Hand abgelegte `.so` umgeht das. Bei Eingriffen in
 den installierten Baum `mtime` UND Aufrufsignatur vergleichen, nicht den Namen.
+
+## Nutzerbestaetigung Referenzblatt (2026-10-29)
+
+Rueckmeldung des Nutzers nach dem Druck von `reference/refsheet.ps` (Jobs 85 und
+86): **"Blau endet mit rechts gelb."** Damit ist der offene Punkt "hellblau am
+Ende" (`logs/dup_gradient.md` §2, "Nutzer fragen, welches Dokument") **geklaert
+und geschlossen**: das alte `drucktest.ps` endete bei R=51/255, also nie bei
+echtem Gelb - der Effekt war das **Testblatt**, nicht der Treiber. Abschnitt B
+des neuen Blattes laeuft mit `t t 1 t sub setrgbcolor`, bei `t=1` also exakt
+`(1,1,0)` = reines Gelb.
+
+Die "2x gedruckt"-Rueckmeldung ist ebenfalls geklaert: Jobs **85** (15:16) und
+**86** (15:18) sind zwei **eigene** Uebermittlungen aus der Verifikation (einmal
+Test, einmal Netzwerk-Mitschnitt), kein Doppeldruck des Treibers. Abschnitt E
+(Grossflaechen-Duplikat) liegt dadurch **doppelt** auf dem Blatt - beim
+Vergleich beachten.
+
+**Weiterhin offen** (unveraendert, echte RE-Arbeit): Zwischen-Ink-Level-Raster.
+Bei Volltoenen und reinem Grau ist der Port byte-identisch zum Orakel; bei
+**Zwischen-Leveln** (z. B. der Blau->Gelb-Verlauf) weichen **C (50 %)** und
+**K (17 %)** der Zeilen ab. Die Separation ist korrekt (Blau/Grau/Gelb stimmen),
+die Abweichung ist eine **Raster-/Level-Wahl** (Dot-Pattern), kein Hue- oder
+Skalenfehler. Das Orakel benutzt dort ein nicht ausgeliefertes Raster
+(`logs/fine_reverse.md` §4, `logs/dup_gradient.md` Messung C).
