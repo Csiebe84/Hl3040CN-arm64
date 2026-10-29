@@ -11,33 +11,34 @@ Repository-specific knowledge for the Brother HL-3040CN driver port.
 
 ## `copies` — KEIN Bug, Messartefakt (2026-10-29)
 - Verdacht war: der Filter erzeugt bei `-n N` nur EINE Seite und setzt nur das
-  Attribut. **Widerlegt.** In der echten CUPS-Kette fächert **`pstops`** die
-  Seiten auf; der Filter bekommt sie bereits `N`-fach und gibt sie `N`-fach aus.
-- Beweis (echte Queue + Socket-Capture, `tools/`-Muster):
-  `lp -n 3 one.ps` -> **3 Seiten**, `lp -n 3 pp.ps` (2 Seiten) -> **6 Seiten**,
-  `lp -n 3 doc.pdf` -> **2 Seiten** (1 Inhaltsseite + Blank), jeweils deterministisch
-  (3 Wiederholungen identisch). `pstops` ist bei JEDEM Job in der Kette
-  (`/var/log/cups/error_log`, `Started filter /usr/lib/cups/filter/pstops`).
-- **Der Trugschluss:** die frühere Testdatei `/mnt/ssd/fuzz/cups_test.ps` ist
-  **kein wohlgeformtes PostScript** – der Body steht VOR `%%BeginProlog` und es
-  fehlen `%%Page`-Marker. `pstops` zählt dafür **0 Seiten** und gibt nur den
-  Setup-Teil durch; der Filter sieht genau eine Seite. Daraus entstand die
-  Fehlmessung "1 Seite bei `-n 3`". Für Kopien-Tests **immer** eine Datei mit
-  `%%Pages`/`%%Page`-Markern nehmen (`/tmp/one.ps`, `/tmp/pp.ps`).
+  Attribut. **Widerlegt.** Die Kette ist `pstops | gs | Filter`; **`pstops`**
+  setzt `#copies N` (und `%RBINumCopies: N`), **Ghostscript** expandiert das zu
+  `N` Seiten, und der Filter rendert jede genau **einmal** – genau wie der
+  Vendor-Filter (`Copies=3` -> 3 Seiten, attr `[3,3,3]`).
+- Beweis (echte Queue + Socket-Capture): `lp -n 3 one.ps` -> **3 Seiten**,
+  `lp -n 3 pp.ps` (2 Seiten) -> **6 Seiten**, deterministisch (3x identisch).
+  `pstops` ist bei JEDEM Job in der Kette (`/var/log/cups/error_log`) und CUPS
+  übergibt `copies=3` als **argv[4]** (Log: `job=116 ... copies=3`).
+- **Der Trugschluss (zweimal dieselbe Falle):** `pstops` zählt Seiten am
+  `%%Page:`-Marker. Eine Datei ohne Marker (Body vor `%%BeginProlog`, wie das
+  alte `/mnt/ssd/fuzz/cups_test.ps` **und** der frühere `page()`-Helper in
+  `tools/fuzz_filter.py`) wird als **0 Seiten** durchgereicht – der Filter sieht
+  dann eine Seite, egal was `-n` sagt. Für Kopien-Tests **immer**
+  `%%Page: 1 1` + `%%BeginPageSetup`/`%%EndPageSetup` setzen.
 - Die zwei Mechanismen sind bewusst getrennt und beide korrekt:
   * `ATTR_PAGE_COPIES = 0x31` (`C1 <lo> <hi> F8 31`, uint16, je BeginImage und
-    EndPage) trägt die Kopienzahl **in-band** – genau wie die Referenz
+    EndPage) trägt die Kopienzahl **in-band** – wie die Referenz
     (`ref/hl4150/tests/test_print_settings.py::TestCopies` erwartet
     `b"\xc1\x03\x00\xf8\x31"`).
-  * die **Seitenwiederholung** macht CUPS' `pstops`, weil das PPD
+  * die **Seitenwiederholung** macht `pstops`+`gs`, weil das PPD
     `*cupsManualCopies: false` sagt (der Drucker kann keine Kopien in Hardware).
 - **Nicht** "fixen": eine eigene Wiederholung im Filter würde bei `-n 3` **9**
-  Seiten drucken (3 von pstops × 3 im Filter). Der Brother-Wrapper pinnt in der
+  Seiten drucken (3 von gs × 3 im Filter). Der Brother-Wrapper pinnt in der
   rc-Datei `Copies=1` (`cupswrapperhl3040cn:224`), sein i386-Filter wiederholt
   deshalb selbst – das ist die **alte** Architektur ohne pstops, kein Vorbild.
-- Prüfkommando (Queue `SINK_TEST` + `/tmp/sock_sink.py`):
-  `lp -d SINK_TEST -n 3 one.ps`, dann im Capture
-  `len(re.findall(rb'\xc1(..)\xf8\x31\xb0', data, re.S))` == erwartete Seitenzahl.
+- Regression: `tools/fuzz_filter.py::run_copies_case` fährt die **echte**
+  `pstops | Filter`-Kette (1 Seite, `-n 3`) und verlangt 3 Bilder mit Zähler 3.
+  Die malformed-Fälle stehen in `EXPECT_FAIL` (sauberer RC != 0 ist dort Erfolg).
 
 ## Mopria / Android discovery state (2026-10-29)
 - Report: `logs/mopria2.md`. Prior: `logs/mopria_analyse.md` (27./28.10.).
