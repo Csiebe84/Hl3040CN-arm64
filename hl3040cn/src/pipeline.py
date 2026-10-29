@@ -21,7 +21,13 @@ import numpy.typing as npt
 
 import color_lut
 from brother_encode import encode_c_plane, encode_fine_plane, encode_m_plane_10, encode_plane
-from dither import DitherChannel, dither_channel_1bpp_arr, dither_channel_4bpp_arr, load_dither_tables
+from dither import (
+    DitherChannel,
+    dither_channel_1bpp_arr,
+    dither_channel_4bpp_arr,
+    dither_channel_4bpp_pattern_arr,
+    load_dither_tables,
+)
 from saturation import adjust_saturation
 from settings import (
     DUPLEX_MAP,
@@ -58,7 +64,9 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 # Per-mode dither dispatcher (intensity ndarray, line_idx, sw, channel) -> packed bytes.
-_DITHER_FNS = {False: dither_channel_1bpp_arr, True: dither_channel_4bpp_arr}
+# Fine reads the level directly from the BRCD per-ink patterns (low nibble),
+# not from a threshold matrix.
+_DITHER_FNS = {False: dither_channel_1bpp_arr, True: dither_channel_4bpp_pattern_arr}
 
 # Per-mode plane encoders, keyed by plane id; partial() pins the K/Y label.
 _PlaneEncoder = Callable[[bytes], bytes]

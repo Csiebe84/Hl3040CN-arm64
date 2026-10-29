@@ -33,12 +33,18 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class DitherChannel:
-    """Ordered-dither threshold matrix for one color channel."""
+    """Ordered-dither threshold matrix (or Fine pattern set) for one channel."""
 
     width: int  # matrix width in pixels (e.g. 32)
     height: int  # matrix height in pixels (e.g. 32)
     # shape (height, width), dtype uint8 — threshold[y][x]: dot if ink > threshold
     threshold_matrix: npt.NDArray[np.uint8] = field(repr=False)
+    # BRCD per-ink-level dot patterns read from the cache file, shape (256, row_bytes).
+    # The Fine dither reads the *level* of a pixel directly as the low nibble of
+    # pattern[ink][(y % height) * (width // 8) + (x % (width // 8))]; it is not a
+    # 1bpp threshold matrix. All-zero when the channel was built from the Bayer
+    # fallback (no patterns), which keeps the byte layout uniform.
+    patterns: npt.NDArray[np.uint8] = field(default_factory=lambda: np.empty((0, 0), dtype=np.uint8), repr=False)
 
     # Threshold matrix tiled to the target page width, keyed by width.
     _tiled_cache: dict[int, npt.NDArray[np.uint8]] = field(default_factory=dict, init=False, repr=False)
@@ -157,7 +163,10 @@ def dither_load_brcd(path: str) -> DitherChannel:
                 raise ValueError(msg)
             patterns.append(pat)
     return DitherChannel(
-        width=width, height=height, threshold_matrix=_extract_threshold_matrix(patterns, width, height)
+        width=width,
+        height=height,
+        threshold_matrix=_extract_threshold_matrix(patterns, width, height),
+        patterns=np.frombuffer(b"".join(patterns), dtype=np.uint8).reshape(256, row_bytes).copy(),
     )
 
 
@@ -344,3 +353,48 @@ def dither_channel_4bpp(row: bytes, y: int, width: int, channel: DitherChannel |
         (width + 1) // 2 bytes of nibble-packed output.
     """
     return dither_channel_4bpp_arr(np.frombuffer(row, dtype=np.uint8, count=width), y, width, channel)
+
+
+def dither_channel_4bpp_pattern_arr(
+    row_arr: npt.NDArray[np.uint8], y: int, width: int, channel: DitherChannel | None = None
+) -> bytes:
+    """Dither a row through the Fine BRCD patterns: the low nibble is the level.
+
+    The HL-3040CN Fine filter turns each continuous ink value into a 16-level
+    intensity by indexing one of the 256 per-ink-level BRCD dot patterns and
+    reading the *byte's low nibble* directly (the patterns are 4bpp level
+    fields, not 1bpp threshold matrices):
+
+        level(x, y) = pattern[ink][(y % H) * (W // 8) + (x % (W // 8))] & 0x0F
+        out[k]      = (level[2k] << 4) | level[2k + 1]
+
+    `row_arr` is in pixel-brightness convention (0 = full ink, 255 = no ink)
+    like every other dither entry point; the pattern index is the ink amount
+    `255 - value` (the CAPT LUT stores the pattern level directly, e.g. C=87
+    at gray 128). The first 4 columns of the capt patterns are white for every
+    ink, so dithering the padded source width yields the 4 zero pad pixels for
+    free; values past `channel.patterns.shape[0]` are clamped to ink 0
+    (empty pattern).
+
+    Returns:
+        width // 2 bytes of nibble-packed output (high nibble = first pixel).
+    """
+    if channel is None:
+        channel = _ensure_defaults()["K"]
+    pats = channel.patterns
+    if pats.size == 0 or channel.width % 8:
+        # No pattern set (Bayer fallback) or malformed geometry: fall back to
+        # the threshold path so the call always produces a scanline.
+        return dither_channel_4bpp_arr(row_arr, y, width, channel)
+
+    wb = channel.width // 8  # pattern bytes per screen row
+    ey = (y % channel.height) * wb
+
+    ink = np.minimum((255 - row_arr[:width]).astype(np.int64), pats.shape[0] - 1)
+    # level[x] = pattern[ink][ey + (x % wb)] & 0x0F
+    x = np.arange(width, dtype=np.int64)
+    levels = pats[ink, ey + (x % wb)] & 0x0F
+
+    # (levels[2k] << 4) | levels[2k + 1]
+    packed = (levels[0::2].astype(np.uint16) << 4) | levels[1::2].astype(np.uint16)
+    return packed.astype(np.uint8).tobytes()

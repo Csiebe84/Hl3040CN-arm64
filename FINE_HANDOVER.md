@@ -419,3 +419,57 @@ Decoding only `entries[0]` of the first block understates a plane by ~7000x.
 **Always sum over all entries.** (The retracted 1020-byte "oracle C stream is a
 2-byte periodic pattern" claim came from that mistake — see 7b for what is
 actually true of a single row.)
+
+---
+
+## 8. Status update 2026-10-28 — the "0600 + binary" theory is REFUTED
+
+An attempt this round set `_BRCD_PREFIX[True] = "0600"` plus a new
+`_FINE_BINARY = True` (2-level `np.where(ink > thr, 15, 0)` quantiser) and
+rewrote `test_fine_mode.py` to match. **It was reverted.** An independent
+adversarial re-measurement (`logs/verify_fine.md`, conversation `6460e813`)
+returned verdict **(b) — claim wrong, high confidence**:
+
+* **The binary quantiser is impossible.** Inverting the oracle's planes with the
+  full alphabet recovers nibble levels **4, 10 and 14**. `np.where(ink>thr,15,0)`
+  can only ever emit `{0,15}`. The claim's own quoted M row
+  `[0,0,0,0,0,0,0,A,F,F]` contains an `A` (level 10) and therefore refutes itself.
+* **`capt` beats `0600` on the only whole-plane metric.** Full-page gray-128
+  byte diff: `capt/bin` diverges 48.9 / 43.0 / 40.1 % (C/M/Y) versus
+  `0600/bin` 100.0 / 95.2 / 55.1 %. So the change made the port *worse*.
+* **The test rewrite weakened the check.** `assertNotEqual` on the Fine/Normal
+  table geometry was flipped to `assertEqual`, and the expected constants were
+  re-pointed at the implementation's own values. The new tests pass whether or
+  not the change is correct.
+
+`hl3040cn/src/dither.py` is back at `_BRCD_PREFIX = {False: "0600", True: "capt"}`
+and `_FINE_BINARY` is gone. All 5 suites green.
+
+### Still genuinely open, and worth keeping
+
+The refuted *conclusion* does not invalidate the *measurements* taken while
+reaching it. Three leads survive and are the input to `TASK_FINE_LEVELS.md` /
+`TASK_FINE_REVERSE.md`:
+
+1. The oracle's Fine C screen looks like a period-10 screen whose phase advances
+   **-3 per scanline**; the shipped `0600-k` table is the same shape but advances
+   **-2**. No shipped table (all 8 `0600`/`0600b`, all 4 `capt`, every ink, every
+   row phase) has the -3 progression.
+2. The oracle's Fine separation inks (C≈58, Y≈24 at gray 128) match **none** of
+   the 17 shipped `*_lut.bin` grids (closest: C 80, Y 63).
+3. The oracle M e0 carries a level-10 nibble, which suggests a third level or a
+   distinct M screen.
+
+Whether these are one screen + a level function (Model A) or per-scanline screen
+alternation (Model B) is **the** open question — Phase 1 settles it by inverting
+**all** scanlines of a plane, not just e0–e11.
+
+### Note on "bit-identical" as the goal
+
+Bit identity is the right target and is measurable: the oracle still runs
+(container `brother-cups`, i386 via qemu, analysis only — the print pipeline is
+emulator-free). But note the upstream GPL reference driver states in its own
+README that its Fine output is **not** byte-identical either. There is no
+finished implementation to copy; this is genuinely unsolved. If Phase 1/2 do not
+close it, the honest fallback is a measured quality bar against the oracle
+(dot-pattern agreement), not a claim of byte identity.
