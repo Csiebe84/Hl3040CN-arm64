@@ -177,3 +177,33 @@ Bei Volltoenen und reinem Grau ist der Port byte-identisch zum Orakel; bei
 die Abweichung ist eine **Raster-/Level-Wahl** (Dot-Pattern), kein Hue- oder
 Skalenfehler. Das Orakel benutzt dort ein nicht ausgeliefertes Raster
 (`logs/fine_reverse.md` §4, `logs/dup_gradient.md` Messung C).
+
+## Transition-Modus delegiert + install.sh gehaertet (2026-10-29)
+
+**Zwei neue Erkenntnisse in den Treiber eingebaut** (nicht nur dokumentiert):
+
+1. **`install.sh` quarantaeniert veraltete `.so`.** Vorher warnte ein
+   fehlgeschlagener Cython-Build nur und liess die **alte** `.so` liegen - genau
+   der Weg, auf dem der Normal-Modus starb (18-Arg-`_band_fast` bei 14 Arg im
+   Aufruf). Jetzt wandern sie nach `.stale-so-<zeitstempel>/`, der
+   byte-identische Python-Pfad laeuft weiter. Isoliert getestet: 2 `.so` -> 0 im
+   Ladepfad, 2 gesichert. `bash -n` sauber.
+2. **`test_kernel_signature.py` prueft auch den installierten Baum** (Klasse
+   `InstalledTreeTest`, in CI uebersprungen). Damit faengt die Suite eine von
+   Hand abgelegte `.so`, nicht nur `install.sh`. 4 Tests, 86 gesamt - OK.
+
+**Warum der PPD-Standard `600x2400dpi` (Fine) ist und das wichtig bleibt:** Der
+Normal-Fehler blieb monatelang unentdeckt, weil Fine den Band-Kernel **nie**
+aufruft. Normal ist aber verifiziert (`FINE_HANDOVER.md`: "Normal's grids are
+already byte-identical - which is why Normal works"), der Kernel-Pfad ist mit
+dem Python-Pfad byte-identisch (50571/5212/32316 B). Der PPD-Standard wurde
+**nicht** geaendert - Fine ist die bessere Qualitaet und die dokumentierte Wahl.
+
+**Offener Punkt an einen Agenten delegiert:** `TASK_TRANSITION.md` +
+`TASK_TRANSITION_LAUNCH.md`, Conversation `909d0256-fde1-4487-932f-30b69313e890`
+(Titel "Transition-Modus: Zwischenlevel-Zeilen", 500 Iterationen). Auftrag: die
+Zwischen-Ink-Level-Luecke schliessen (C 50 %, K 17 % der Zeilen weichen ab,
+Level `b8` vs `b0`). Der Auftrag nennt ausdruecklich, was **nicht** zu wiederholen
+ist (falsche Tabellen, reine Level-Transformation, Phasenfehler, Encoder) und wo
+die Harnesse liegen (`/mnt/ssd/finecmp/`, reboot-fest). Orakel-Container
+`brother-cups` laeuft; Drucker `.50:9100` erreichbar.
