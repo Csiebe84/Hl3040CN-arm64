@@ -132,5 +132,38 @@ class KernelSignatureTest(unittest.TestCase):
         self.assertEqual(list(params), _pyx_params())
 
 
+@unittest.skipUnless(
+    Path("/usr/local/lib/brhl3040cn").is_dir(),
+    "driver not installed on this machine",
+)
+class InstalledTreeTest(unittest.TestCase):
+    """The installed extensions must match the installed source.
+
+    A `.so` placed by hand can be older than the source it should match; that
+    is exactly how Normal mode was dead for a while.  This runs only where the
+    driver is installed, so it is skipped in CI.
+    """
+
+    LIB = Path("/usr/local/lib/brhl3040cn")
+
+    def test_installed_pyx_signature_matches_installed_module(self) -> None:
+        """Installed `.pyx` and installed `.so` must agree."""
+        pyx = HERE / "_band_fast.pyx"
+        if not pyx.is_file():
+            self.skipTest("source tree not next to the test")
+        spec = importlib.util.find_spec("_band_fast")
+        if spec is None:
+            self.skipTest("no kernel importable")
+        import _band_fast
+
+        installed = list(inspect.signature(_band_fast.render_band).parameters)
+        self.assertEqual(
+            installed,
+            _pyx_params(),
+            "the importable _band_fast does not match the .pyx source: "
+            f"{installed} vs {_pyx_params()} -- rebuild or quarantine",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

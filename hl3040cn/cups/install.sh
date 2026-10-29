@@ -134,7 +134,21 @@ if "$VENV_DIR/bin/pip" install --quiet cython setuptools \
     cp "$BUILD_DIR/src/"_*_fast*.so "$LIB_DIR/"
     echo "  Cython extensions installed."
 else
-    echo "  WARNING: Cython build failed; pure-Python fallback will be used."
+    # A stale .so is worse than none: an old module whose signature no longer
+    # matches pipeline.py aborts every job that uses it.  This happened once --
+    # an 18-argument _band_fast broke Normal mode, while Fine (which never calls
+    # it) kept working, so the queue looked healthy.  Quarantine whatever is
+    # installed and let the pure-Python fallback run; it is byte-identical,
+    # just slower.
+    if compgen -G "$LIB_DIR/_*_fast*.so" >/dev/null; then
+        STALE_DIR="$LIB_DIR/.stale-so-$(date +%Y%m%d-%H%M%S)"
+        mkdir -p "$STALE_DIR"
+        mv "$LIB_DIR/"_*_fast*.so "$STALE_DIR/"
+        echo "  WARNING: Cython build failed; pure-Python fallback will be used."
+        echo "           Stale extensions quarantined in $STALE_DIR."
+    else
+        echo "  WARNING: Cython build failed; pure-Python fallback will be used."
+    fi
 fi
 rm -rf "$BUILD_DIR"
 
