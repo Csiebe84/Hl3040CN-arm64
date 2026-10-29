@@ -1,0 +1,102 @@
+%!PS-Adobe-3.0
+%%BoundingBox: 0 0 595 842
+%%Pages: 1
+%%Title: HL-3040CN Referenzblatt Kalibrierung
+%%LanguageLevel: 2
+
+% REFERENZBLATT zur Kalibrierung des nativen HL-3040CN-Treibers.
+% Bitte in FARBE und mindestens 300 dpi einscannen.
+% Fine-Qualitaet (600x2400dpi), Toner-Sparmodus AUS.
+
+/Helvetica findfont 13 scalefont setfont
+0 0 0 setrgbcolor 40 800 moveto (HL-3040CN Referenzblatt - nativer ARM64-Treiber) show
+/Helvetica findfont 9 scalefont setfont
+0 0 0 setrgbcolor 40 785 moveto (Fine 600x2400dpi, TonerSparmodus AUS. Bitte in FARBE und >=300 dpi scannen.) show
+
+% ---- A: Grundfarben ----
+/Helvetica findfont 11 scalefont setfont
+0 0 0 setrgbcolor 40 758 moveto (A  Grundfarben) show
+1 0 0 setrgbcolor 40 730 90 22 rectfill
+0 1 0 setrgbcolor 140 730 90 22 rectfill
+0 0 1 setrgbcolor 240 730 90 22 rectfill
+1 1 0 setrgbcolor 340 730 90 22 rectfill
+0 0 0 setrgbcolor 440 730 90 22 rectfill
+0.5 0.5 0.5 setrgbcolor 40 700 90 22 rectfill
+0 1 1 setrgbcolor 140 700 90 22 rectfill
+1 0 1 setrgbcolor 240 700 90 22 rectfill
+0 0 0 setrgbcolor 40 686 moveto (rot          gruen        blau         gelb         schwarz) show
+0 0 0 setrgbcolor 40 674 moveto (50% grau     cyan         magenta) show
+
+% ---- B: Blau -> Gelb ----
+/Helvetica findfont 11 scalefont setfont
+0 0 0 setrgbcolor 40 646 moveto (B  Blau -> Gelb (RGB 0,0,255 -> 255,255,0) - hier war "hellblau am Ende") show
+0 1 128 {
+  /i exch def
+  /t i 127 div def
+  t t 1 t sub setrgbcolor
+  40 t 495 mul add 612 4 26 rectfill
+} for
+/Helvetica findfont 8 scalefont setfont
+0 0 0 setrgbcolor 40 604 moveto (links: blau) show
+400 604 moveto (Mitte: grau) show
+470 604 moveto (rechts: gelb) show
+
+% ---- C: Graustufen ----
+/Helvetica findfont 11 scalefont setfont
+0 0 0 setrgbcolor 40 578 moveto (C  Graustufen 0..255 in 16 Stufen) show
+0 1 16 {
+  /i exch def
+  /v i 17 mul def
+  v 255 div setgray
+  40 i 30 mul add 544 28 26 rectfill
+} for
+/Helvetica findfont 7 scalefont setfont
+0 0 0 setrgbcolor 40 532 moveto (0      32     64     96     128    160    192    224    255) show
+
+% ---- D: Blau-Anteil ----
+/Helvetica findfont 11 scalefont setfont
+0 0 0 setrgbcolor 40 510 moveto (D  Blau-Anteil: B=255, R/G sinken von 0 nach 255) show
+0 1 64 {
+  /i exch def
+  /t i 63 div def
+  t t 1 setrgbcolor
+  40 t 495 mul add 478 7.5 26 rectfill
+} for
+
+% ---- E: Duplikat-Test ----
+/Helvetica findfont 11 scalefont setfont
+0 0 0 setrgbcolor 40 454 moveto (E  Duplikat-Test: dieselbe Grafik 3x) show
+0 1 3 {
+  /k exch def
+  0.25 0.35 0.85 setrgbcolor
+  k 110 mul 40 add 398 60 34 rectfill
+  0 0 0 setrgbcolor
+  k 110 mul 40 add 410 moveto (K) show
+} for
+0 0 0 setrgbcolor 40 384 moveto (Anzahl gezaehlter Kaesten: ________) show
+
+% ---- F: Feine Linien ----
+/Helvetica findfont 11 scalefont setfont
+0 0 0 setrgbcolor 40 362 moveto (F  Feine Linien 1..6 px) show
+0 0 0 setrgbcolor
+1 1 6 {
+  /w exch def
+  w setlinewidth
+  40 328 200 0 rlineto
+  0 w neg rlineto
+  0 5 rlineto
+} for
+stroke
+/Helvetica findfont 7 scalefont setfont
+0 0 0 setrgbcolor 40 306 moveto (Linien 1-6 px) show
+
+% ---- G: Kennung ----
+/Helvetica findfont 9 scalefont setfont
+0 0 0 setrgbcolor 40 270 moveto (G  Kennung) show
+/Helvetica findfont 8 scalefont setfont
+0 0 0 setrgbcolor 40 256 moveto (Treiber: native ARM64, kein qemu-i386. Fine-Modus mit 4/3-Dehnung.) show
+0 0 0 setrgbcolor 40 242 moveto (Erwartung: B endet GELB (nicht hellblau). C zeigt 16 Stufen. E zeigt genau 3 Kaesten.) show
+0 0 0 setrgbcolor 40 228 moveto (Datum: 2026-10-29   Queue: Brother_HL-3040CN) show
+
+showpage
+%%EOF

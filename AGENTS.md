@@ -60,3 +60,43 @@ Repository-specific knowledge for the Brother HL-3040CN driver port.
 - Still open (out of scope, unchanged): MIXED colours (`s_128_128_130`,
   `s_200_50_100`, gradients) deviate in C/M/Y/K — a separation/level-choice
   issue, not this geometry.
+
+## Decoder + Ink-Level: was wirklich gilt (2026-10-25, aus /root/AGENTS.md)
+
+Uebernommen aus der Odroid-Arbeitsnotiz, weil es **hier** hingehoert (die Notiz
+dort ist inzwischen gekuerzt). Alles in `/root/brother/native/` gemessen, Oracle
+`brother-cups`.
+
+- **Der 10-bit-Decoder EXISTIERT und ist byte-genau.** `src/rle_decode.py` hat
+  `decode_10bit` UND `decode_12bit`; nur `decode_20bit` fehlt. Beweis:
+  `tools/test_decoders.py` -> `12-bit OK`, `10-bit OK`, `oracle M-Zeilen
+  dekodiert: 120 ok, 0 fehlerhaft`. Round-Trip gegen echte Oracle-Eintraege:
+  12-bit 5/5 identisch (Y/Gelb), 10-bit 5/5 identisch (M/Rot). Die frueheren
+  Notizen "10-bit/20-bit nicht lesbar" sind **falsch**.
+- **Der 20-bit-Decoder fehlt, wird aber NICHT gebraucht.** Die Pipeline
+  *encodiert* 20-bit C korrekt ohne je zu dekodieren. Zum Abgleich genuegt die
+  **Vorwaerts-Methode**: `encode_c_plane(dither(level))` Byte fuer Byte gegen den
+  Oracle-Eintrag.
+- **FALLE: `Dichte*255` ist NICHT der Ink-Level.** Die Dither-Abbildung ist
+  nichtlinear (`dots = (255-ink) > threshold`, 80x80-Schwellen). Fuer Rot:
+  M-Dichte 0.797, Y-Dichte 0.581 -> die frueheren "M~177/Y~127" waren nur
+  `Dichte*255`. Bit-genau (24 Zeilen, Restfehler 0,22 %) ist Rot **Y-Level 65 =
+  Ink 190** (deckt sich mit STATUS.md, nicht mit NOTES.md). Immer per Dither
+  bit-genau suchen oder vorwaerts vergleichen.
+- **Blockaufteilung ist KEIN eigener Bug:** Oracle M 450 Zeilen @60 B vs. native
+  M 2159 Zeilen @12,5 B - **beide flushen bei ~27000 B**
+  (`PLANE_BUF_INIT_FREE 32754 - FLUSH_THRESH 5768 = 26986`). Die Blockhoehe ist
+  Folge der Datendichte, nicht des Trenners.
+- **Pruefstand-Falle:** `compare.py` nutzt `PrintSettings()`-Defaults
+  (`improve_gray=False`, `color_matching=NORMAL`) -> Tabelle `rgb_default`. Die
+  Oracle-rc (`brhl3040cn/inf/brhl3040cnrc`) sagt aber **`BRGray=ON`** ->
+  `rgb_ig_default`. Der Vergleich lief also gegen die **falsche** Tabelle -
+  zuerst korrigieren, sonst ist jede Suche irrefuehrend.
+- **Vorwaerts-Sweep Rot:** `srgb_default` 480.701 B vs. Oracle 475.191 B
+  (**1,2 % daneben**), alle anderen um Faktor 2-9. 13 Tabellen sind extrahiert
+  und benannt (im Binary 0x2a541 cmyk, 0x47340 cmyk_ig, 0x814b3 rgb, ...).
+- **Bevorzugter Weg:** Vorwaerts-Bytvergleich der **ganzen Session** (der
+  Encoder ist fuer K-Seiten byte-genau) statt Oracle-Dekodieren - das umgeht
+  die 10/20-bit-Frage vollstaendig. `tools/table_search.py` macht das;
+  `tools/find_red_cell.py` liest den Grid-Eckknoten direkt (Rot (255,0,0) ist
+  exakt Knoten 16, keine Interpolation).

@@ -473,3 +473,74 @@ README that its Fine output is **not** byte-identical either. There is no
 finished implementation to copy; this is genuinely unsolved. If Phase 1/2 do not
 close it, the honest fallback is a measured quality bar against the oracle
 (dot-pattern agreement), not a claim of byte identity.
+
+---
+
+## 9. SOLVED 2026-10-29 — the 4/3 stretch, and Fine is byte-identical
+
+The last open defect is closed. §8's open question ("one screen + a level
+function, or per-scanline alternation") was the wrong frame: it is neither.
+The missing piece is a **4/3 stretch of the packed scanline**.
+
+### The rule
+
+For a Fine dither row whose screen row width in bytes is `wb = width // 8`:
+
+> If `wb % 3 == 0`, insert a `0x00` byte **before every packed byte whose HIGH
+> nibble is an intermediate level** (not 0, not 15). Otherwise emit verbatim.
+
+The high nibble is the level of the even pixel. `wb = 12` (Y and K, 96-pixel
+screens) expands 12 -> 16 bytes per screen row, so a 2550-byte line becomes 3400
+(+2 pad = 3402 = 2552 x 4/3). `wb = 20` (C and M, 160-pixel screens) is not a
+whole number of 4-byte groups and is emitted verbatim -- which is exactly why
+C and M were byte-identical all along.
+
+This is **geometry, not channel**: the K plane stretches too (`aw_o` K gradient,
+ink 2..6, rows `y = 1 mod 6`), proving the trigger is `wb % 3 == 0` and the
+intermediate high nibble, not the plane's identity.
+
+### Independent verification (measured, not claimed)
+
+A separate reimplementation of the rule, compared against the **real** Brother
+oracle via `s1model.forward` (not via the port function -- no circularity):
+
+| capture | plane | ink | rows identical |
+|---|---|---|---|
+| `s128_fine` (gray128) | C / M / Y | 87 / 64 / 64 | **6564/6564 each** |
+| `g192_fine` (gray192) | C / M / Y | 44 / 32 / 32 | **6564/6564 each** |
+| `g64_fine` (gray64) | K / C / M / Y | 74 / 111 / 80 / 79 | **6564/6564 each** |
+
+**65640/65640 rows identical across all 10 plane comparisons.** The changed
+port function `dither_channel_4bpp_pattern_arr` reproduces this exactly
+(`/tmp/implchk.py`).
+
+Negative controls (Y, gray128): correct **6564/6564**, no stretch 5470/6564,
+stretch always **0/6564**, low-nibble trigger 4376/6564. The test discriminates.
+
+### Two corrections to earlier reasoning
+
+1. **"intermediate level -> deviation" was wrong.** The real condition is an
+   intermediate level at an **even** pixel (the high nibble). `capt-y` ink 64 has
+   intermediates at odd pixels on rows 1 and 7 -- those rows do **not** deviate.
+   The old rationale "gray64 has no intermediates" is also false (rows 1 and 7
+   carry level 14); the number 6564/6564 was right for the wrong reason.
+2. **§8's "no shipped table has the -3 progression"** was a symptom of comparing
+   *unstretched* rows. Once the stretch is applied, the shipped `capt-y` table is
+   correct as-is. No table needed changing.
+
+### What is NOT solved by this
+
+The **physical print** question (the user's "light blue at the bottom of the
+page"). The computed stream is now byte-identical to Brother's own filter, so a
+driver-side colour error can be ruled out. Anything visible on paper is now a
+printer/firmware/consumable question, not a software one.
+
+### Reproduce
+
+```
+.venv312/bin/python /tmp/rule_indep.py    # 10/10 planes identical
+.venv312/bin/python /tmp/rule_neg.py      # negative controls
+.venv312/bin/python /tmp/implchk.py       # 65640/65640 via the port function
+```
+
+Details and the full derivation: `logs/fine_stretch_rule.md`.
