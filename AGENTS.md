@@ -100,3 +100,56 @@ dort ist inzwischen gekuerzt). Alles in `/root/brother/native/` gemessen, Oracle
   die 10/20-bit-Frage vollstaendig. `tools/table_search.py` macht das;
   `tools/find_red_cell.py` liest den Grid-Eckknoten direkt (Rot (255,0,0) ist
   exakt Knoten 16, keine Interpolation).
+
+## Erster echter Fix: `_BRCD_CACHE = "cache08"` (2026-10-25)
+
+Aus /root/AGENTS.md hierher gehoert (dort gekuerzt). `dither.py` suchte die
+BRCD-Tabellen als `0600-k_cache09.bin` (HL-4150CDN-Satz), die **HL-3040CN
+liefert aber `cache08`**. Jede Suche schlug fehl -> stiller Fallback auf eine
+generierte 32x32-Bayer-Matrix (falsche Farben, aber kein Fehler). Korrektur:
+`_BRCD_CACHE = "cache08"`.
+- **Beleg:** rote Seite 8.520.560 B -> **162.634 B** (Oracle 475.612 B); M- und
+  Y-Zeile je 643 B -> **6 B** (Oracle 6 B). Y-Ebene **bit-genau** gegen das
+  Oracle bei Level 190 (`err=0` ueber 11520 Bit), Round-Trip identisch.
+- 9 Regressionstests, inkl. einem, der den Bayer-Fallback erkennt (haelt den
+  Fehler fern). Backup: `/root/brother/backup-lut-fix-20261024-224335/`.
+
+## Normal-Modus war still tot: veraltetes `_band_fast`-Modul (2026-10-29)
+
+**Symptom:** keines. Fine druckte (PPD-Standard ist `600x2400dpi`), die Queue
+sah gesund aus. **Jeder Normal-Job** lieferte aber nur einen **375-Byte-PJL-
+Stummel** - keine Seite, kein sichtbarer CUPS-Fehler.
+
+**Ursache:** `pipeline._band_kernel_colour()` uebergibt `render_band()`
+**14** Positionsargumente. Die **installierte** `_band_fast`-Erweiterung
+(Python 3.11, 29.10. 00:09) stammte aus einem **verworfenen Experiment** mit
+zweitem Per-Pixel-Graugitter: **18** Parameter (`gray_lut, gray_grid,
+gray_weights, gray_black` extra). Die Quelle war spaeter zurueckgebaut
+(`_band_fast.pyx` und `pipeline.py` beide 14, kein `gray_`), die `.so` aber nie
+neu gebaut -> `TypeError: render_band() takes exactly 18 positional arguments
+(14 given)`. Der Kernel laeuft **nur im Normal-Modus** (`is_fine` -> `None`),
+deshalb blieb der Fehler in Fine unsichtbar.
+
+| Artefakt | mtime | `render_band`-Argumente |
+|---|---|---|
+| `src/_band_fast.pyx` (Quelle) | 2026-10-26 18:44 | 14 |
+| `pipeline.py` (Quelle) | 2026-10-28 23:31 | uebergibt 14 |
+| installierte `.so` | **2026-10-29 00:09** | **18** |
+
+**Fix:** alle vier Erweiterungen mit dem Interpreter des Filters neu bauen
+(Python 3.11, Cython 3.3.0): `cd hl3040cn && /usr/local/lib/brhl3040cn/.venv/
+bin/python3 setup_cython.py build_ext --inplace --force`. Danach
+**byte-identisch** zum Python-Pfad (KernelParityTest + direkter Vergleich
+50571/5212/32316 B gleich).
+
+**Beleg:** Normal durch die echte CUPS-Kette **375 B -> 748684 B** (exit 0);
+Fine unveraendert 1495842 B; Fine gegen Orakel weiter 65640/65640; Suite 82 OK.
+Backups: `backup-install-20261029/so-stale/` (die alte 18-Arg-`.so`),
+`so-vor-rebuild/` (die vier vor dem Neubau).
+
+**Lehre:** Die gruene Suite fing das NICHT - `KernelParityTest` ist
+`skipUnless`-Kernel und in CI werden die Erweiterungen gar nicht gebaut (und die
+Brother-Blobs sind gitignored), also skip. **Ein kompiliertes Artefakt, das
+neuer ist als seine Quelle, ist ein Warnsignal**; `install.sh` baut mit `--force`
+genau deshalb, aber eine von Hand abgelegte `.so` umgeht das. Bei Eingriffen in
+den installierten Baum `mtime` UND Aufrufsignatur vergleichen, nicht den Namen.
