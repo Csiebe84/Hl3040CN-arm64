@@ -72,6 +72,10 @@ jobs:
         working-directory: hl3040cn/src
         run: python3 -m unittest test_fine_mode -v
 
+      - name: Cython kernel signature (stale .so guard)
+        working-directory: hl3040cn/src
+        run: python3 -m unittest test_kernel_signature -v
+
       - name: Ghostscript version
         if: always()
         run: gs --version
