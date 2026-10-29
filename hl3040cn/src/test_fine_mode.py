@@ -19,6 +19,8 @@ import sys
 import unittest
 from pathlib import Path
 
+import numpy as np
+
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 # `band`/`pclxl` (the XL2HB stream parser) live in the repository's top-level
@@ -112,6 +114,85 @@ class FineDitherTableTest(unittest.TestCase):
                     (fine[channel].width, fine[channel].height),
                     (normal[channel].width, normal[channel].height),
                 )
+
+
+class FineStretchTest(unittest.TestCase):
+    """The 4/3 stretch of 96 px Fine screen rows (Y and K).
+
+    The filter emits a screen row whose byte width `wb` is a multiple of 3
+    (96 px -> wb=12) widened to wb*4/3 by inserting a zero byte before every
+    packed byte whose high nibble (the even pixel's level) is intermediate,
+    i.e. neither 0 nor 15.  The 160 px screens (C and M, wb=20) are never
+    stretched.  These checks are self-contained: they build synthetic patterns,
+    so they do not need Brother's blobs.
+    """
+
+    @staticmethod
+    def _channel(width: int, row_bytes: bytes) -> dither.DitherChannel:
+        # One pattern row, replicated for every ink level.
+        wb = width // 8
+        pats = np.tile(np.frombuffer(row_bytes, dtype=np.uint8), (256, 1))
+        return dither.DitherChannel(width=width, height=1, threshold_matrix=np.zeros((1, width), np.uint8),
+                                    patterns=pats)
+
+    def test_intermediate_even_pixels_stretch(self):
+        # 0xAA: both nibbles 10 (intermediate), so every packed byte's high
+        # nibble is intermediate -> every packed byte gains a leading zero.
+        chan = self._channel(24, bytes([0x0A, 0x0A, 0x0A]))
+        row = np.zeros(24, dtype=np.uint8)
+        out = dither.dither_channel_4bpp_pattern_arr(row, 0, 24, chan)
+        self.assertEqual(out, bytes([0x00, 0xAA]) * 12)
+
+    def test_plain_high_nibbles_do_not_stretch(self):
+        # High nibbles cycle F, F, 0 -> no intermediate even pixel.
+        chan = self._channel(24, bytes([0x0F, 0x00, 0x0F]))
+        row = np.zeros(24, dtype=np.uint8)
+        out = dither.dither_channel_4bpp_pattern_arr(row, 0, 24, chan)
+        self.assertEqual(len(out), 12)
+
+    def test_non_multiple_of_three_width_never_stretches(self):
+        # wb = 5 is not a multiple of 3, so 0xAA must pass through verbatim.
+        chan = self._channel(40, bytes([0x0A, 0x0A, 0x0A, 0x0A, 0x0A]))
+        row = np.zeros(40, dtype=np.uint8)
+        out = dither.dither_channel_4bpp_pattern_arr(row, 0, 40, chan)
+        self.assertEqual(out, bytes([0xAA]) * 20)
+
+    @require_blobs(lut=True)
+    def test_capt_c_and_m_never_stretch(self):
+        tables = dither.load_dither_tables(str(LUT_DIR), fine=True, toner_save=False)
+        for name in ("C", "M"):
+            chan = tables[name]
+            with self.subTest(channel=name):
+                self.assertEqual(chan.width // 8 % 3, 20 % 3)  # 20 px-byte row
+                for y in range(chan.height):
+                    for ink in (1, 4, 64, 111, 200):
+                        out = dither.dither_channel_4bpp_pattern_arr(
+                            np.full(5104, 255 - ink, np.uint8), y, 5104, chan
+                        )
+                        self.assertEqual(len(out), 5104 // 2)
+
+    @require_blobs(lut=True)
+    def test_capt_y_row_lengths_follow_the_stretch_rule(self):
+        chan = dither.load_dither_tables(str(LUT_DIR), fine=True, toner_save=False)["Y"]
+        self.assertEqual((chan.width, chan.height), (96, 12))
+        wb = chan.width // 8
+        lengths = set()
+        for y in range(chan.height):
+            for ink in (32, 64, 79):
+                row = np.full(5104, 255 - ink, np.uint8)
+                out = dither.dither_channel_4bpp_pattern_arr(row, y, 5104, chan)
+                # Expected length: verbatim, plus one byte per packed byte whose
+                # high nibble (the even pixel's level) is intermediate.
+                ey = (y % chan.height) * wb
+                idx = np.minimum((255 - row[:5104]).astype(np.int64), chan.patterns.shape[0] - 1)
+                levels = chan.patterns[idx, ey + (np.arange(5104) % wb)] & 0x0F
+                packed = (levels[0::2].astype(np.uint16) << 4) | levels[1::2].astype(np.uint16)
+                expected = 2552 + int(((packed >> 4 != 0) & (packed >> 4 != 15)).sum())
+                self.assertEqual(len(out), expected)
+                lengths.add(len(out))
+        # The rule must actually fire: at least one Y row stretches.
+        self.assertIn(3403, lengths)  # 2552 packed + 851 inserted zeros
+
 
 
 class FineHeaderTest(unittest.TestCase):

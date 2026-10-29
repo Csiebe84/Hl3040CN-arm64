@@ -377,7 +377,9 @@ def dither_channel_4bpp_pattern_arr(
     (empty pattern).
 
     Returns:
-        width // 2 bytes of nibble-packed output (high nibble = first pixel).
+        The nibble-packed scanline (high nibble = first pixel). Usually
+        `width // 2` bytes, but a 96 px screen row (Y and K) is widened to
+        4/3 of that length when it carries intermediate levels at even pixels.
     """
     if channel is None:
         channel = _ensure_defaults()["K"]
@@ -396,5 +398,19 @@ def dither_channel_4bpp_pattern_arr(
     levels = pats[ink, ey + (x % wb)] & 0x0F
 
     # (levels[2k] << 4) | levels[2k + 1]
-    packed = (levels[0::2].astype(np.uint16) << 4) | levels[1::2].astype(np.uint16)
-    return packed.astype(np.uint8).tobytes()
+    packed = ((levels[0::2].astype(np.uint16) << 4) | levels[1::2].astype(np.uint16)).astype(np.uint8)
+
+    # 4/3 stretch. The filter widens a screen row whose byte width `wb` is a
+    # multiple of 3 (Y and K: 96 px -> wb=12) to wb*4/3 by inserting a zero byte
+    # before every packed byte whose high nibble (the even pixel's level) is
+    # intermediate, i.e. neither 0 nor 15.  Rows whose intermediates fall only
+    # on odd pixels are left untouched, and the 160 px screens (C and M: wb=20,
+    # not a multiple of 3) are never stretched -- both match the oracle.
+    if wb % 3 == 0:
+        ins = (packed >> 4 != 0) & (packed >> 4 != 15)
+        if ins.any():
+            stretched = np.zeros(packed.size + int(ins.sum()), dtype=np.uint8)
+            stretched[np.arange(packed.size) + np.cumsum(ins)] = packed
+            return stretched.tobytes()
+
+    return packed.tobytes()
