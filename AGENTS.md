@@ -7,7 +7,37 @@ Repository-specific knowledge for the Brother HL-3040CN driver port.
 - `ref/brhl3040cnfilter.bin` — i386 filter binary to reverse engineer.
 - `tools/` — analysis harnesses. `.venv312/bin/python` is the interpreter.
 - `logs/` — deliverable reports (e.g. logs/fine_levels.md).
-- Oracle fixtures live on /mnt/ssd/finecmp (NVRAM-hostile /tmp must be avoided for data).
+  - Oracle fixtures live on /mnt/ssd/finecmp (NVRAM-hostile /tmp must be avoided for data).
+
+## `copies` — KEIN Bug, Messartefakt (2026-10-29)
+- Verdacht war: der Filter erzeugt bei `-n N` nur EINE Seite und setzt nur das
+  Attribut. **Widerlegt.** In der echten CUPS-Kette fächert **`pstops`** die
+  Seiten auf; der Filter bekommt sie bereits `N`-fach und gibt sie `N`-fach aus.
+- Beweis (echte Queue + Socket-Capture, `tools/`-Muster):
+  `lp -n 3 one.ps` -> **3 Seiten**, `lp -n 3 pp.ps` (2 Seiten) -> **6 Seiten**,
+  `lp -n 3 doc.pdf` -> **2 Seiten** (1 Inhaltsseite + Blank), jeweils deterministisch
+  (3 Wiederholungen identisch). `pstops` ist bei JEDEM Job in der Kette
+  (`/var/log/cups/error_log`, `Started filter /usr/lib/cups/filter/pstops`).
+- **Der Trugschluss:** die frühere Testdatei `/mnt/ssd/fuzz/cups_test.ps` ist
+  **kein wohlgeformtes PostScript** – der Body steht VOR `%%BeginProlog` und es
+  fehlen `%%Page`-Marker. `pstops` zählt dafür **0 Seiten** und gibt nur den
+  Setup-Teil durch; der Filter sieht genau eine Seite. Daraus entstand die
+  Fehlmessung "1 Seite bei `-n 3`". Für Kopien-Tests **immer** eine Datei mit
+  `%%Pages`/`%%Page`-Markern nehmen (`/tmp/one.ps`, `/tmp/pp.ps`).
+- Die zwei Mechanismen sind bewusst getrennt und beide korrekt:
+  * `ATTR_PAGE_COPIES = 0x31` (`C1 <lo> <hi> F8 31`, uint16, je BeginImage und
+    EndPage) trägt die Kopienzahl **in-band** – genau wie die Referenz
+    (`ref/hl4150/tests/test_print_settings.py::TestCopies` erwartet
+    `b"\xc1\x03\x00\xf8\x31"`).
+  * die **Seitenwiederholung** macht CUPS' `pstops`, weil das PPD
+    `*cupsManualCopies: false` sagt (der Drucker kann keine Kopien in Hardware).
+- **Nicht** "fixen": eine eigene Wiederholung im Filter würde bei `-n 3` **9**
+  Seiten drucken (3 von pstops × 3 im Filter). Der Brother-Wrapper pinnt in der
+  rc-Datei `Copies=1` (`cupswrapperhl3040cn:224`), sein i386-Filter wiederholt
+  deshalb selbst – das ist die **alte** Architektur ohne pstops, kein Vorbild.
+- Prüfkommando (Queue `SINK_TEST` + `/tmp/sock_sink.py`):
+  `lp -d SINK_TEST -n 3 one.ps`, dann im Capture
+  `len(re.findall(rb'\xc1(..)\xf8\x31\xb0', data, re.S))` == erwartete Seitenzahl.
 
 ## Mopria / Android discovery state (2026-10-29)
 - Report: `logs/mopria2.md`. Prior: `logs/mopria_analyse.md` (27./28.10.).
@@ -45,21 +75,25 @@ Repository-specific knowledge for the Brother HL-3040CN driver port.
   .text vaddr base 0x8048e48 (foff = va - 0x8048e48 + 0xe48).
 - Handover docs: FINE_HANDOVER.md (has uncommitted stale §7d claim), TASK_FINE_LEVELS.md.
 
-## Fine mode — 4/3 stretch resolved (2026-10-29)
-- The last byte-identical gap is closed. `dither_channel_4bpp_pattern_arr`
-  (`hl3040cn/src/dither.py`) now 4/3-stretches a screen row whose byte width
-  `wb = width//8` is a multiple of 3 (Y and K: 96 px -> wb=12): a `0x00` is
-  inserted before every packed byte whose HIGH nibble (even pixel's level) is
-  intermediate (not 0/15). C/M (wb=20) are never stretched; rows whose
-  intermediates sit only on odd pixels stay verbatim. Geometry-based, not
-  channel-based (K follows the same rule).
-- Proof: C/M/Y 6564/6564 for gray 128 and 192, all planes 6564/6564 for gray 64,
-  K 6564/6564 for black; whole Job byte-identical after the `session()` marker.
-  Details + reproduction: logs/fine_stretch.md. Regression: test_fine_mode.py
-  `FineStretchTest`.
-- Still open (out of scope, unchanged): MIXED colours (`s_128_128_130`,
-  `s_200_50_100`, gradients) deviate in C/M/Y/K — a separation/level-choice
-  issue, not this geometry.
+## Fine mode — Zwischenlevel-Lücke geschlossen (2026-10-29)
+- Die letzte byte-identische Lücke war **kein** Raster-/Transition-Modus,
+  sondern ein **Off-by-one im Stage-1-RLE-Encoder**
+  (`compress_rle_preencode`, `hl3040cn/src/fine_encoder.py`): im Zweig
+  `lo_nibble == 0` (Byte `0x_0`, hi != 0) mit laufendem Weiss-Run emittiert der
+  Filter `run_white * 8`, der Port emittierte `run_white * 8 - 8`. Binär-Beweis
+  `0x804f623: lea ecx,[esi*8]; ... or ecx,0xa0`. Symptom war `b8` vs `b0`.
+- Die frühere **4/3-Dehnung** der Y/K-Screen-Zeilen (`dither.py`) war ein
+  **Workaround** für genau diesen Fehler und ist **entfernt**.
+  `dither_channel_4bpp_pattern_arr` gibt jetzt immer `width // 2` Bytes zurück.
+- Beweis: `tools/verify_fine_stretch.py` **87082/87082** (Orakel unabhängig
+  dekodiert, Port-Seite = Produktions-Pfad), inkl. der zuvor offenen
+  gemischten/Solid-Fixtures (`s_200_50_100`, `s_128_128_130`). Suite 86/86.
+- Details: logs/fine_transition.md. Regression: test_fine_mode.py
+  (`FineEncoderTest.test_lo_zero_run_white_token`, `FineStretchTest`).
+- **Weiterhin offen (separater Auftrag):** Fine-**Verlaufs**-Bilder (`grad2`,
+  `drucktest2`) weichen ab, aber **ausschliesslich in Stage 2**
+  (`compress_pattern_encode`): Stage 1 (Dither + RLE) ist auf allen Ramp-Platten
+  byte-identisch; nur die Stage-2-Tokenisierung weicht ab.
 
 ## Decoder + Ink-Level: was wirklich gilt (2026-10-25, aus /root/AGENTS.md)
 

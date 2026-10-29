@@ -109,7 +109,7 @@ def compress_rle_preencode(data: bytes) -> bytes:
                         run_white -= 3
                         _flush_white_run()
                         run_white = 3
-                    output.append(((run_white * 8 - 8) & 0xFF) | ((hi_nibble >> 5) - 1) | 0xA0)
+                    output.append(((run_white * 8) & 0xFF) | ((hi_nibble >> 5) - 1) | 0xA0)
                     run_white = 0
                     continue
                 if run_black != 0:
