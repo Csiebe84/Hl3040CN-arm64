@@ -52,11 +52,12 @@ Gemessen an `drucktest2.ps` (eine Letter-Seite, 4958x6981) auf dem Odroid N2+.
   `.venv312` liegt Cython 3.3.0.
 
 ## Offene Punkte, die KEIN Defekt sind (2026-10-30)
-- `interp_tables.bin` fehlt in `src/color_data/`, also generiert
-  `color_lut._load_interp_tables()` die Tabellen bei **jedem Job** neu
-  (33 ms, deterministisch, 43 KiB). Kosmetisch – die Log-Zeile
-  "generating analytically" erscheint deshalb bei jedem Lauf. Einmal
-  wegschreiben wuerde das Rauschen und 33 ms/Job sparen.
+- ~~`interp_tables.bin` fehlt~~ **erledigt (2026-10-30):** die Datei liegt jetzt in
+  `src/color_data/` (44217 B, sha256 `68ba7464…`) und wird von `install.sh`
+  mitkopiert. Beweis der Gleichwertigkeit: mit und ohne Datei ist der XL2HB-Output
+  **byte-identisch** (sha256 `eba9e1f1…`, 10454 B) – die Datei ist nur der
+  zwischengespeicherte Wert der analytischen Erzeugung. Die Log-Zeile
+  "generating analytically" erscheint nicht mehr, und die 33 ms/Job entfallen.
 - **Der Verlaufs-Vergleich mit den alten Fixtures ist NICHT belastbar.**
   `grad2_port.xl2hb` und `drucktest2_port.xl2hb` stammen vom 29.10. 09:04/09:14,
   der Stage-1-Fix (`1e55eb2`) aber erst vom 29.10. 20:29 – sie sind veraltet.

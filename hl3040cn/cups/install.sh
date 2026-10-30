@@ -120,6 +120,28 @@ if ! (cd "$LIB_DIR" && PYTHONPATH="$LIB_DIR" "$VENV_DIR/bin/python3" cli.py --pr
     echo "  WARNING: inverse LUT precompute failed; per-pixel interpolation will be used."
 fi
 
+# The interpolation weights are a pure function of the grid geometry, so the
+# cached form is byte-identical to generating them analytically. Writing it
+# once avoids recomputing it on every job and silences the "generating
+# analytically" line. color_data/ is gitignored (Brother's tables are not
+# redistributed), so this has to happen here, not in the repository.
+echo "Caching interpolation weight tables..."
+"$VENV_DIR/bin/python3" - <<'PY'
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path.cwd()))
+from color_lut_gen import generate_interp_tables  # noqa: E402
+
+target = Path("color_data/interp_tables.bin")
+if target.exists():
+    print(f"  {target} already present, keeping it.")
+else:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(generate_interp_tables().tobytes())
+    print(f"  Wrote {target} ({target.stat().st_size} bytes).")
+PY
+
 echo "Building Cython acceleration..."
 BUILD_DIR="$(mktemp -d)"
 mkdir -p "$BUILD_DIR/src"
