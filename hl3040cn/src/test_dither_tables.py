@@ -10,6 +10,8 @@ import struct
 import unittest
 from pathlib import Path
 
+import numpy as np
+
 import dither
 from test_blobs import require_blobs
 
@@ -78,6 +80,76 @@ class BrcdHeaderTest(unittest.TestCase):
         ch = dither.dither_load_brcd(str(LUT_DIR / "0600-y_cache08.bin"))
         self.assertEqual(ch.threshold_matrix.dtype.name, "uint8")
         self.assertEqual(ch.threshold_matrix.shape, (24, 24))
+
+
+@require_blobs(lut=True)
+class Native4bppPatternTest(unittest.TestCase):
+    """The C gather must reproduce the numpy gather byte for byte.
+
+    `dither_row_4bpp_pattern` runs four times per scanline and is the largest
+    single cost on a Fine page, so it is tempting to trust.  It is a byte loop
+    over a pattern table, though, and an off-by-one in the index arithmetic
+    still yields a plausible-looking bitmap.  Compare against the vector path
+    over every channel, edge widths and wrap-around y.
+    """
+
+    def _reference(self, row_arr, y, width, channel):
+        pats = channel.patterns
+        wb = channel.width // 8
+        ey = (y % channel.height) * wb
+        ink = np.minimum((255 - row_arr[:width]).astype(np.int64), pats.shape[0] - 1)
+        levels = pats[ink, dither._pattern_index_column(y % channel.height, wb, width)] & 0x0F
+        return ((levels[0::2].astype(np.uint16) << 4) | levels[1::2].astype(np.uint16)).astype(np.uint8).tobytes()
+
+    def setUp(self):
+        if dither.dither_row_4bpp_pattern is None:
+            raise AssertionError(
+                "the native 4bpp gather is not importable; rebuild _dither_fast so "
+                "this equivalence check actually runs"
+            )
+        self.channels = dither.load_brcd_tables(str(LUT_DIR))
+        self.rnd = np.random.RandomState(11)
+
+    def test_matches_vector_path(self):
+        bad = 0
+        for channel in self.channels.values():
+            for width in (2, 4, 8, channel.width - 2, channel.width, channel.width + 2, channel.width * 2):
+                for _ in range(6):
+                    row = self.rnd.randint(0, 256, width).astype(np.uint8)
+                    for y in (0, 1, 23, 24, 79, 80, 157, 400, 2187, 65535):
+                        got = dither.dither_channel_4bpp_pattern_arr(row, y, width, channel)
+                        self.assertEqual(got, self._reference(row, y, width, channel), f"y={y} width={width}")
+        self.assertEqual(bad, 0)
+
+    def test_extreme_rows(self):
+        channel = self.channels["K"]
+        width = channel.width
+        for value in (0, 128, 255):
+            row = np.full(width, value, dtype=np.uint8)
+            for y in range(0, 200):
+                self.assertEqual(
+                    dither.dither_channel_4bpp_pattern_arr(row, y, width, channel),
+                    self._reference(row, y, width, channel),
+                    f"value={value} y={y}",
+                )
+
+    def test_odd_width_behaves_like_the_vector_path(self):
+        """Both paths must agree on whether an odd width is an error, not differ."""
+        channel = self.channels["K"]
+        for width in (5, 7, 79, 81):
+            row = self.rnd.randint(0, 256, width).astype(np.uint8)
+            try:
+                reference = self._reference(row, 3, width, channel)
+            except Exception as exc:  # noqa: BLE001 - the reference itself may refuse
+                reference = type(exc).__name__
+            try:
+                native = dither.dither_channel_4bpp_pattern_arr(row, 3, width, channel)
+            except Exception as exc:  # noqa: BLE001
+                native = type(exc).__name__
+            if isinstance(reference, str):
+                self.assertEqual(native, reference, f"width={width} (reference raised)")
+            else:
+                self.assertEqual(native, reference, f"width={width}")
 
 
 if __name__ == "__main__":

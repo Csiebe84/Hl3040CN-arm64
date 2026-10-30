@@ -614,7 +614,11 @@ def encode_fine_plane(data: bytes) -> bytes:
     Returns:
         Compressed bytes, or empty bytes if the scanline is all-zero.
     """
-    if not any(data):
+    # A page is mostly blank rows, so this test runs once per scanline and is
+    # worth keeping in C: `strip` returns empty for an all-zero buffer without
+    # building an iterator, where `any` walked the whole line in Python.  Both
+    # mean the same thing here - every byte is zero.
+    if not data.strip(b"\x00"):
         return b""
     stage1 = compress_rle_preencode(data)
     if not stage1:
