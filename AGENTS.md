@@ -40,7 +40,14 @@ Gemessen an `drucktest2.ps` (eine Letter-Seite, 4958x6981) auf dem Odroid N2+.
   Ursache: beide Stufen sind **reines Python**, Byte fuer Byte, ohne numpy.
 - **Fine gegen Normal (gleiche Seite):** Fine 10,06 s / 1.234.964 B,
   Normal 0,66 s / 748.716 B -> **Fine ist 15x teurer**.
-- **Die Cython-Beschleuniger decken nur den Normal-Modus.** `_rle_fast`,
+- **Erledigt (2026-10-30): Quantisierung per `bytes.translate`.** Die
+  nibble-Quantisierung lief Byte fuer Byte in Python; jetzt macht das eine
+  256er-Tabelle in C. Beweis der Gleichwertigkeit: die Tabelle stimmt fuer
+  **alle 256 Werte** mit der Inline-Formel ueberein, und der XL2HB-Output ist
+  **byte-identisch** (`cmp` auf `e2e.ps` und `drucktest2.ps`). Gemessen:
+  A4-Platte 3139 ms -> 15 ms; eine Letter-Seite **13,2 s -> 9,4 s (-29 %)**,
+  die Testsuite 54,7 s -> 44,3 s. 89 Tests gruen.
+- **Naechster Hebel: die Cython-Beschleuniger decken nur den Normal-Modus.** `_rle_fast`,
   `_band_fast`, `_color_fast`, `_dither_fast` werden aus `rle.py`,
   `plane_encoders.py`, `pipeline.py`, `color_lut.py`, `dither.py` importiert –
   `fine_encoder.py` importiert **nichts** davon (kein `_fast`-Treffer).
