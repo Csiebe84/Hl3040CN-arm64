@@ -130,14 +130,27 @@ def main() -> int:
         return 2
     blob = session(Path(args[0]).read_bytes())
     blocks = band.decode_blocks(pclxl.parse(blob))
+
+    # Stage 2 only exists in Fine mode; a Normal (600 dpi) capture stores its
+    # planes as 10/12/20-bit RLE and would desynchronise the decoder.  Refuse
+    # it up front instead of failing with a confusing IndexError mid-stream.
+    normal = [b for b in blocks if b.header.comp_size != 0]
+    if normal:
+        sizes = sorted({b.header.comp_size for b in normal})
+        print(
+            f"not a Fine-mode stream: {len(normal)}/{len(blocks)} blocks carry "
+            f"comp_size={sizes} (Normal 600 dpi RLE), which stage 2 cannot decode",
+        )
+        return 2
+
     total = checked = ok = 0
     for block in blocks:
         for entry in block.entries:
             total += 1
             try:
                 stage1 = decode_stage2(entry)
-            except ValueError as exc:
-                print(f"plane {block.plane} start {block.start_line}: {exc}")
+            except (ValueError, IndexError) as exc:
+                print(f"plane {block.plane} start {block.start_line}: {type(exc).__name__}: {exc}")
                 continue
             if check:
                 checked += 1
