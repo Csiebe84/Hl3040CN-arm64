@@ -36,3 +36,7 @@ samples/
 .color_agent_id
 .delegated_agents
 prompts/
+
+# --- Local pre-change backups (kept on disk, not in history) ---
+backup-*/
+*.vor-*
