@@ -9,6 +9,43 @@ Repository-specific knowledge for the Brother HL-3040CN driver port.
 - `logs/` — deliverable reports (e.g. logs/fine_levels.md).
   - Oracle fixtures live on /mnt/ssd/finecmp (NVRAM-hostile /tmp must be avoided for data).
 
+## Hardware-Verifikation (2026-10-30)
+- Drucker `192.168.178.50:9100` ist ein **echter HL-3040CN** (MAC `00:1b:a9`,
+  PJL `INFO ID` = `"Brother HL-3040CN series:84E-201:Ver.1.18"`). Web-UI braucht
+  Auth (404 ohne), SNMP antwortet nicht – **PJL auf 9100 ist der Zugang**:
+  `@PJL INFO ID|STATUS|PAGECOUNT`.
+- **Ein "Job completed" beweist NICHTS.** Der `socket`-Backend meldet Erfolg,
+  sobald die Bytes im TCP-Puffer sind. Der einzige harte Beweis ist der
+  **Hardware-Seitenzähler** `@PJL INFO PAGECOUNT`: er stieg in dieser Sitzung
+  **7916 -> 7917**. `tools/hw_verify.py` fährt genau das (ID-Prüfung, dann
+  Zähler vor/nach; `--status` nur berichten).
+- **Falle:** `@PJL INFO STATUS` wechselte mitten in der Messung auf
+  `CODE=41202 DISPLAY="Kein Papier" ONLINE=FALSE` – der Job lag an, es kam nur
+  kein Papier raus. Vor dem Test `--status` lesen; ohne Papier bleibt der
+  Zähler stehen und man hält es fälschlich für einen Treiberfehler.
+- Stream-Form stimmt mit dem Orakel überein: gleicher PJL-Kopf
+  (`@PJL SET ECONOMODE…` / `ENTER LANGUAGE=XL2HB`) und gleiches Ende
+  (`1DIB` + `@PJL EOJ NAME="Print Job"` + UEL). Nur `@PJL JOB NAME=`/`PRINTLOG`
+  fehlt, den der Vendor-Wrapper setzt (kosmetisch).
+
+## Stage-2-Verlaufsabweichung: KEIN Druckfehler (2026-10-30)
+- **Befund: das gedruckte Bild ist identisch.** Über die graue 60-Balken-Rampe
+  sind **alle 26256 Zeilen (4 Platten) auf Rasterebene gleich** – Stage 1 ist auf
+  **allen 3282 abweichenden Zeilen identisch**. Die Differenz ist **ausschließlich
+  die Kompressionsgröße** (Port 10127324 B vs. Orakel 8608471 B, **+17,6 %**).
+- Warum das Orakel kleiner ist: es findet auf denselben Bytes **längere Muster**
+  (Mode 4/Stride 3) wo der Port Mode 3 + Literale schreibt. Erste Abweichung ist
+  immer `or=0x10` (Literal) gegen `port=0x0b` (Mode-3-Extended-Header).
+- `compress_pattern_encode(s1) == oracle_entry` ist **false** – das Orakel wählt
+  eine andere, kürzere Tokenisierung; es ist **kein** Bug im Decoder.
+- **Konsequenz:** kein sichtbarer Fehler, nur mehr Bytes über den Socket (bei
+  einer 600-dpi-A4-Seite ~1,5 MB). Fix wäre eine reine Optimierung in
+  `compress_pattern_encode` (Stride-3/4-Kandidaten länger verfolgen) – offen.
+- **Falle:** `grad2chk.py` baut eine ANDERE Rampe (Rot->Cyan) als das Fixture und
+  meldet deshalb "6564 s1-diffs" – Artefakt des Skripts, kein Befund. Für
+  Aussagen über `gray` immer dieselbe Rampe rekonstruieren.
+- Werkzeug: `tools/stage2_diag.py`.
+
 ## `copies` — KEIN Bug, Messartefakt (2026-10-29)
 - Verdacht war: der Filter erzeugt bei `-n N` nur EINE Seite und setzt nur das
   Attribut. **Widerlegt.** Die Kette ist `pstops | gs | Filter`; **`pstops`**
