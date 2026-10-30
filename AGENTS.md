@@ -45,6 +45,18 @@ Repository-specific knowledge for the Brother HL-3040CN driver port.
   meldet deshalb "6564 s1-diffs" – Artefakt des Skripts, kein Befund. Für
   Aussagen über `gray` immer dieselbe Rampe rekonstruieren.
 - Werkzeug: `tools/stage2_diag.py`.
+  - **Verlustfreiheit bewiesen (2026-10-30):** `decode_stage2(compress_pattern_encode(s1))
+    == s1` auf **allen 26256 Zeilen** der gray-Rampe, je Platte K/M/C/Y. Aufgeschluesselt
+    (byte-identisch / Stage-1-gleich / Roundtrip-verlustfrei): K 6564/6564/6564,
+    Y 6564/6564/6564, C 3282/6564/6564, M 3282/6564/6564. C und M weichen also nur in
+    der Tokenisierung ab, **kein einziges Byte** geht verloren. Regressionstests:
+    `Stage2LosslessTest` in `test_fine_mode.py`.
+  - **Falle (neu, hat mich selbst erwischt):** `v3_normal_ramp_or.xl2hb` ist ein
+    **Normal-Modus**-Capture (600 dpi, `comp_size` 10/12/20). Der Fine-Stage-2-Decoder
+    gehoert dort **nicht** hinein - er desynchronisiert und stirbt mitten im Stream mit
+    `IndexError`, was wie ein Decoder-Bug aussieht, aber eine Modusverwechslung ist.
+    `tools/fine_decode.py` prueft jetzt `comp_size` der Block-Header und lehnt einen
+    solchen Stream mit Begruendung ab. Modus vorher pruefen: Fine == `comp_size 0`.
 
 ## `copies` — KEIN Bug, Messartefakt (2026-10-29)
 - Verdacht war: der Filter erzeugt bei `-n N` nur EINE Seite und setzt nur das

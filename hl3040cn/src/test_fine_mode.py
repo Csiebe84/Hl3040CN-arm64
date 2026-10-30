@@ -251,5 +251,63 @@ class FineEncoderTest(unittest.TestCase):
         self.assertEqual(compress_rle_preencode(bytes([0, 0, 0, 0, 0x60])), bytes.fromhex("10ba"))
 
 
+class Stage2LosslessTest(unittest.TestCase):
+    """Stage 2 must never change the image, only its size.
+
+    Stage 2 is a pure compression layer on top of Stage 1, and Stage 1 is the
+    raster.  Brother's filter tokenises the same Stage-1 bytes differently (it
+    finds longer stride-3 patterns where this encoder emits literals), so the
+    port's output is larger, but the decoded pixels are identical.  These tests
+    pin that property so the size gap is never mistaken for a rendering bug.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        # `fine_decode` (the Stage-2 inverse) lives in the repository's tools/.
+        tools = HERE.parents[1] / "tools"
+        if str(tools) not in sys.path:
+            sys.path.insert(0, str(tools))
+        try:
+            import fine_decode  # noqa: F401
+        except ImportError:  # pragma: no cover - tools/ absent in some checkouts
+            raise unittest.SkipTest("tools/fine_decode.py is not available")
+
+    def _roundtrip(self, stage1: bytes) -> bool:
+        from fine_decode import decode_stage2
+        from fine_encoder import compress_pattern_encode
+
+        return decode_stage2(compress_pattern_encode(stage1)) == stage1
+
+    def test_roundtrip_on_repeating_runs(self):
+        # Every stride the encoder knows, plus a literal-heavy tail.
+        for data in (
+            bytes([0x55]) * 40,               # stride 1
+            bytes([0x11, 0x22]) * 20,         # stride 2
+            bytes([0x11, 0x22, 0x33]) * 15,   # stride 3
+            bytes(range(0x10, 0x30)),         # literals only
+            bytes([0x10]) * 3 + bytes([0xAA, 0xBB]) * 7 + bytes([0x11]) * 9,
+        ):
+            with self.subTest(data=data[:6].hex()):
+                self.assertTrue(self._roundtrip(data))
+
+    def test_roundtrip_on_stage1_output(self):
+        # Stage 1 output is what Stage 2 actually sees in production.
+        from fine_encoder import compress_rle_preencode
+
+        for raw in (
+            bytes(300),                       # white run
+            bytes([0xFF]) * 300,              # black run
+            bytes([0x12, 0x34]) * 150,        # mixed nibbles
+            bytes(64) + bytes([0xFF]) * 64,
+        ):
+            with self.subTest(raw=raw[:4].hex()):
+                self.assertTrue(self._roundtrip(compress_rle_preencode(raw)))
+
+    def test_empty_input_stays_empty(self):
+        from fine_encoder import compress_pattern_encode
+
+        self.assertEqual(compress_pattern_encode(b""), b"")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
