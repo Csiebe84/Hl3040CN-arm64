@@ -9,6 +9,25 @@ Repository-specific knowledge for the Brother HL-3040CN driver port.
 - `logs/` — deliverable reports (e.g. logs/fine_levels.md).
   - Oracle fixtures live on /mnt/ssd/finecmp (NVRAM-hostile /tmp must be avoided for data).
 
+## Status (2026-10-30, Ende dieser Sitzung)
+- **Emulatorfrei bewiesen:** kein `qemu`/`i386`/`binfmt` irgendwo im CUPS-Pfad
+  (`/etc/cups`, `/usr/lib/cups/filter`, `/usr/local/lib/brhl3040cn`). Der Filter
+  laeuft unter `/usr/bin/python3.11` auf `aarch64` – native, kein Emulator.
+- **Installation == Repo:** alle 29 Module unter `/usr/local/lib/brhl3040cn/`
+  sind byte-identisch zu `hl3040cn/src/` (`cmp` je Datei).
+- **Tests: 89 gruen** (`unittest discover -s hl3040cn/src`), davon 3 neue in
+  `Stage2LosslessTest`.
+- **Ende-zu-Ende ohne Hardware:** PostScript -> Filter -> 583104 B XL2HB,
+  24 Bloecke, `comp_size 0` (Fine), alle Checksummen ok, exit 0.
+- **Echter CUPS-Job 123** (`lp -d Brother_HL-3040CN`): Filter und socket-Backend
+  je `exited with no errors`; kein Papier -> nichts gedruckt.
+- **Veroeffentlicht:** privat `Csiebe84/Hl3040CN-arm64`, Branch `master`, HEAD
+  `80e2c0d`, 0 unpushed, CI gruen. Push nur ueber `./gitpush.sh` (`~/.gh_token`,
+  Konto `Csiebe84`) – `$GITHUB_TOKEN` gehoert `christiansiebe` und darf nicht.
+- **Offen:** Sichtpruefung auf Papier (blockiert: `Kein Papier`, CODE=41202).
+  Sobald Papier eingelegt ist, laeuft `tools/hw_verify.py` den Beweis
+  (PAGECOUNT vor/nach).
+
 ## Hardware-Verifikation (2026-10-30)
 - Drucker `192.168.178.50:9100` ist ein **echter HL-3040CN** (MAC `00:1b:a9`,
   PJL `INFO ID` = `"Brother HL-3040CN series:84E-201:Ver.1.18"`). Web-UI braucht
