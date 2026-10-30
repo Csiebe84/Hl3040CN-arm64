@@ -28,6 +28,43 @@ Repository-specific knowledge for the Brother HL-3040CN driver port.
   Sobald Papier eingelegt ist, laeuft `tools/hw_verify.py` den Beweis
   (PAGECOUNT vor/nach).
 
+## Performance-Profil: Fine-Modus ist der Hebel (2026-10-30)
+Gemessen an `drucktest2.ps` (eine Letter-Seite, 4958x6981) auf dem Odroid N2+.
+
+- **Ghostscript ist NICHT das Problem: 0,23 s.** Die uebrigen **~10-13 s** stecken
+  vollstaendig in der Python-Pipeline. Wer Zeit sparen will, muss dort ansetzen.
+- **Zeitverteilung (`cProfile`, Fine):** `compress_rle_preencode` (Stage 1) 6,4 s
+  und `compress_pattern_encode` (Stage 2) 5,6 s – praktisch **1:1**, kein
+  einseitiger Suendenbock. Dazu 8,5 Mio `bytearray.append` = 4,1 s.
+  Auf einer grossen Flaeche (5100x6564) sind es **57 Mio `append` = 28 s**.
+  Ursache: beide Stufen sind **reines Python**, Byte fuer Byte, ohne numpy.
+- **Fine gegen Normal (gleiche Seite):** Fine 10,06 s / 1.234.964 B,
+  Normal 0,66 s / 748.716 B -> **Fine ist 15x teurer**.
+- **Die Cython-Beschleuniger decken nur den Normal-Modus.** `_rle_fast`,
+  `_band_fast`, `_color_fast`, `_dither_fast` werden aus `rle.py`,
+  `plane_encoders.py`, `pipeline.py`, `color_lut.py`, `dither.py` importiert –
+  `fine_encoder.py` importiert **nichts** davon (kein `_fast`-Treffer).
+  Ein `_fine_fast.pyx` fuer `compress_rle_preencode` + `compress_pattern_encode`
+  waere der Weg; die Werkzeuge (`build_cython.sh`, `setup_cython.py`) liegen bereit.
+- **Falle:** `.so`-Dateien im Repo sind **cpython-312**, die Installation laeuft
+  aber auf **python3.11** (`.so` = cpython-311). Nicht wild kopieren – der
+  Installer baut selbst. `python3 -c "import Cython"` schlaegt fehl, im
+  `.venv312` liegt Cython 3.3.0.
+
+## Offene Punkte, die KEIN Defekt sind (2026-10-30)
+- `interp_tables.bin` fehlt in `src/color_data/`, also generiert
+  `color_lut._load_interp_tables()` die Tabellen bei **jedem Job** neu
+  (33 ms, deterministisch, 43 KiB). Kosmetisch – die Log-Zeile
+  "generating analytically" erscheint deshalb bei jedem Lauf. Einmal
+  wegschreiben wuerde das Rauschen und 33 ms/Job sparen.
+- **Der Verlaufs-Vergleich mit den alten Fixtures ist NICHT belastbar.**
+  `grad2_port.xl2hb` und `drucktest2_port.xl2hb` stammen vom 29.10. 09:04/09:14,
+  der Stage-1-Fix (`1e55eb2`) aber erst vom 29.10. 20:29 – sie sind veraltet.
+  Ein frischer Render gegen `drucktest2_or.xl2hb` ergab **0 von 334 Zeilen
+  gleich**, also eine Zeilen-Verschiebung (andere Capture-Bedingungen), keinen
+  Rasterbefund. Vor jeder Aussage ueber Verlaeufe muessen Orakel und Port
+  **aus derselben Quelle und mit denselben Settings** stammen.
+
 ## Hardware-Verifikation (2026-10-30)
 - Drucker `192.168.178.50:9100` ist ein **echter HL-3040CN** (MAC `00:1b:a9`,
   PJL `INFO ID` = `"Brother HL-3040CN series:84E-201:Ver.1.18"`). Web-UI braucht
