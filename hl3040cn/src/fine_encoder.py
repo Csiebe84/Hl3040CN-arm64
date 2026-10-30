@@ -21,7 +21,7 @@ _QUANTIZE = bytes(
 )
 
 
-def compress_rle_preencode(data: bytes) -> bytes:
+def compress_rle_preencode_py(data: bytes) -> bytes:
     """Stage 1 of Fine mode compression: nibble-aware RLE pre-encoding.
 
     Input: 4bpp nibble-packed scanline data (e.g. 2480 bytes for Fine A4).
@@ -277,7 +277,7 @@ def _pattern_flush(
     return pattern_start
 
 
-def compress_pattern_encode(data: bytes) -> bytes:
+def compress_pattern_encode_py(data: bytes) -> bytes:
     """Stage 2 of Fine mode compression: pattern-matching encoder.
 
     Buffers 12 bytes, detects repeating patterns at strides 1/2/3.
@@ -578,6 +578,34 @@ def compress_pattern_encode(data: bytes) -> bytes:
         pattern_start += 1
 
     return bytes(output)
+
+
+# Prefer the native encoders when the extension is built. `test_fine_fast_equiv`
+# replays frozen output for 1600 real oracle scanlines plus edge cases, so the
+# two implementations are pinned to each other; a machine without a compiler
+# falls back to the Python loops above and still prints identically.
+#
+# The guard catches every exception, not just ImportError: a .so left over from
+# an older source tree imports fine but blows up at call time with a signature
+# mismatch, which once took the whole queue down.  A slow page beats no page.
+try:
+    from _fine_fast import (  # type: ignore[import-not-found]
+        compress_pattern_encode,
+        compress_rle_preencode,
+    )
+
+    HAS_CYTHON_FINE = True
+except Exception as _exc:  # noqa: BLE001 - a broken .so must not stop printing
+    import warnings
+
+    warnings.warn(
+        f"_fine_fast unavailable ({_exc!r}); using the Python Fine-mode encoders",
+        RuntimeWarning,
+        stacklevel=2,
+    )
+    compress_rle_preencode = compress_rle_preencode_py
+    compress_pattern_encode = compress_pattern_encode_py
+    HAS_CYTHON_FINE = False
 
 
 def encode_fine_plane(data: bytes) -> bytes:
