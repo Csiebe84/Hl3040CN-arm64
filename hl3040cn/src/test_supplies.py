@@ -631,6 +631,147 @@ class MarkerReadTest(unittest.TestCase):
         self.assertEqual(lines[3], "ATTR: marker-levels=26,10,8,2,41")
 
 
+class RealIndexLayoutTest(unittest.TestCase):
+    """The table layout a real HL-3040CN answers with.
+
+    RFC 3805 indexes `prtMarkerSuppliesTable` by
+    `hrDeviceIndex.prtMarkerSuppliesIndex`, so the printer replies to a walk of
+    column `.6` with `.6.1.1` through `.6.1.10` -- not `.6.1` through `.6.10`.
+
+    This test exists because the fake agent used to answer the flat form, which
+    the old code read with `oid.rsplit(".", 1)[1]`. That made every type lookup
+    miss and every capacity lookup miss, so all ten supplies came back as
+    "unknown" and the belt and the four drums read -1. The flat form still has
+    to work (some printers do answer it), so both are covered.
+
+    Values are the ones the real printer returned on 2026-10-31.
+    """
+
+    REAL = [
+        # names
+        ("1.3.6.1.2.1.43.11.1.1.6.1.1", 0x04, "Black Toner Cartridge"),
+        ("1.3.6.1.2.1.43.11.1.1.6.1.2", 0x04, "Cyan Toner Cartridge"),
+        ("1.3.6.1.2.1.43.11.1.1.6.1.3", 0x04, "Magenta Toner Cartridge"),
+        ("1.3.6.1.2.1.43.11.1.1.6.1.4", 0x04, "Yellow Toner Cartridge"),
+        ("1.3.6.1.2.1.43.11.1.1.6.1.5", 0x04, "Waste Toner Box"),
+        ("1.3.6.1.2.1.43.11.1.1.6.1.6", 0x04, "Belt Unit"),
+        ("1.3.6.1.2.1.43.11.1.1.6.1.7", 0x04, "Black Drum Unit"),
+        ("1.3.6.1.2.1.43.11.1.1.6.1.8", 0x04, "Cyan Drum Unit"),
+        ("1.3.6.1.2.1.43.11.1.1.6.1.9", 0x04, "Magenta Drum Unit"),
+        ("1.3.6.1.2.1.43.11.1.1.6.1.10", 0x04, "Yellow Drum Unit"),
+        # types: 3 toner, 4 waste-toner, 1 other, 9 opc
+        ("1.3.6.1.2.1.43.11.1.1.5.1.1", 0x02, 3),
+        ("1.3.6.1.2.1.43.11.1.1.5.1.2", 0x02, 3),
+        ("1.3.6.1.2.1.43.11.1.1.5.1.3", 0x02, 3),
+        ("1.3.6.1.2.1.43.11.1.1.5.1.4", 0x02, 3),
+        ("1.3.6.1.2.1.43.11.1.1.5.1.5", 0x02, 4),
+        ("1.3.6.1.2.1.43.11.1.1.5.1.6", 0x02, 1),
+        ("1.3.6.1.2.1.43.11.1.1.5.1.7", 0x02, 9),
+        ("1.3.6.1.2.1.43.11.1.1.5.1.8", 0x02, 9),
+        ("1.3.6.1.2.1.43.11.1.1.5.1.9", 0x02, 9),
+        ("1.3.6.1.2.1.43.11.1.1.5.1.10", 0x02, 9),
+        # levels: toners and waste -3 (unknown), belt 20488, drums 4083
+        ("1.3.6.1.2.1.43.11.1.1.9.1.1", 0x02, -3),
+        ("1.3.6.1.2.1.43.11.1.1.9.1.2", 0x02, -3),
+        ("1.3.6.1.2.1.43.11.1.1.9.1.3", 0x02, -3),
+        ("1.3.6.1.2.1.43.11.1.1.9.1.4", 0x02, -3),
+        ("1.3.6.1.2.1.43.11.1.1.9.1.5", 0x02, -3),
+        ("1.3.6.1.2.1.43.11.1.1.9.1.6", 0x02, 20488),
+        ("1.3.6.1.2.1.43.11.1.1.9.1.7", 0x02, 4083),
+        ("1.3.6.1.2.1.43.11.1.1.9.1.8", 0x02, 4083),
+        ("1.3.6.1.2.1.43.11.1.1.9.1.9", 0x02, 4083),
+        ("1.3.6.1.2.1.43.11.1.1.9.1.10", 0x02, 4083),
+        # max capacity: toners and waste -2 (none), belt 50000, drums 15000
+        ("1.3.6.1.2.1.43.11.1.1.8.1.1", 0x02, -2),
+        ("1.3.6.1.2.1.43.11.1.1.8.1.2", 0x02, -2),
+        ("1.3.6.1.2.1.43.11.1.1.8.1.3", 0x02, -2),
+        ("1.3.6.1.2.1.43.11.1.1.8.1.4", 0x02, -2),
+        ("1.3.6.1.2.1.43.11.1.1.8.1.5", 0x02, -2),
+        ("1.3.6.1.2.1.43.11.1.1.8.1.6", 0x02, 50000),
+        ("1.3.6.1.2.1.43.11.1.1.8.1.7", 0x02, 15000),
+        ("1.3.6.1.2.1.43.11.1.1.8.1.8", 0x02, 15000),
+        ("1.3.6.1.2.1.43.11.1.1.8.1.9", 0x02, 15000),
+        ("1.3.6.1.2.1.43.11.1.1.8.1.10", 0x02, 15000),
+    ]
+
+    def setUp(self) -> None:
+        rows = list(self.REAL) + [
+            (brsupply.OID_MAINTENANCE, 0x04, _raw_maintenance()),
+            (brsupply.OID_COUNTERS, 0x04, _raw_counters()),
+        ]
+        self.agent = FakeAgent(rows)
+        self.client = snmp.SnmpClient("127.0.0.1", self.agent.port, timeout=1.0)
+
+    def tearDown(self) -> None:
+        self.agent.close()
+
+    def test_all_ten_supplies_are_reported(self) -> None:
+        markers = marker.read_markers(self.client)
+        self.assertEqual(len(markers), 10)
+
+    def test_types_survive_the_two_level_index(self) -> None:
+        markers = {m.name: m for m in marker.read_markers(self.client)}
+        self.assertEqual(markers["Black Toner Cartridge"].type, "toner")
+        self.assertEqual(markers["Waste Toner Box"].type, "waste-toner")
+        self.assertEqual(markers["Belt Unit"].type, "other")
+        self.assertEqual(markers["Black Drum Unit"].type, "opc")
+
+    def test_belt_and_drums_are_not_minus_one(self) -> None:
+        # The whole point: these read -1 before the index was handled.
+        markers = {m.name: m for m in marker.read_markers(self.client)}
+        self.assertEqual(markers["Belt Unit"].level, 40)      # 20488/50000
+        self.assertEqual(markers["Black Drum Unit"].level, 27)  # 4083/15000
+
+    def test_toner_levels_come_from_the_private_mib(self) -> None:
+        markers = {m.name: m for m in marker.read_markers(self.client)}
+        self.assertEqual(markers["Black Toner Cartridge"].level, 26)
+        self.assertEqual(markers["Cyan Toner Cartridge"].level, 10)
+        self.assertEqual(markers["Magenta Toner Cartridge"].level, 8)
+        self.assertEqual(markers["Yellow Toner Cartridge"].level, 2)
+
+    def test_waste_box_stays_unknown(self) -> None:
+        # -2 capacity and -3 level: there is genuinely no figure to report.
+        markers = {m.name: m for m in marker.read_markers(self.client)}
+        self.assertEqual(markers["Waste Toner Box"].level, -1)
+
+    def test_colours_are_not_swapped(self) -> None:
+        markers = {m.name: m for m in marker.read_markers(self.client)}
+        self.assertEqual(markers["Magenta Toner Cartridge"].color, "#FF00FF")
+        self.assertEqual(markers["Yellow Toner Cartridge"].color, "#FFFF00")
+        self.assertEqual(markers["Magenta Drum Unit"].color, "#FF00FF")
+        self.assertEqual(markers["Yellow Drum Unit"].color, "#FFFF00")
+
+
+class FlatIndexLayoutTest(unittest.TestCase):
+    """The flat index form still has to work.
+
+    Not every printer answers with `hrDeviceIndex` in front; the fake agent used
+    in the other tests uses the flat form, so this guards against "fixing" the
+    two-level case by breaking the one-level one.
+    """
+
+    def setUp(self) -> None:
+        self.agent = FakeAgent([
+            ("1.3.6.1.2.1.43.11.1.1.6.1", 0x04, "Black Toner Cartridge"),
+            ("1.3.6.1.2.1.43.11.1.1.6.6", 0x04, "Belt Unit"),
+            ("1.3.6.1.2.1.43.11.1.1.5.6", 0x02, 1),
+            ("1.3.6.1.2.1.43.11.1.1.9.6", 0x02, 20617),
+            ("1.3.6.1.2.1.43.11.1.1.8.6", 0x02, 50000),
+            (brsupply.OID_MAINTENANCE, 0x04, _raw_maintenance()),
+            (brsupply.OID_COUNTERS, 0x04, _raw_counters()),
+        ])
+        self.client = snmp.SnmpClient("127.0.0.1", self.agent.port, timeout=1.0)
+
+    def tearDown(self) -> None:
+        self.agent.close()
+
+    def test_flat_index_still_reads_type_and_capacity(self) -> None:
+        markers = {m.name: m for m in marker.read_markers(self.client)}
+        self.assertEqual(markers["Belt Unit"].type, "other")
+        self.assertEqual(markers["Belt Unit"].level, 41)
+        self.assertEqual(markers["Black Toner Cartridge"].level, 26)
+
+
 def _raw_maintenance() -> str:
     """The maintenance payload as raw octets, with the checksum byte."""
     return bytes.fromhex(MODERN_MAINTENANCE + "ff")

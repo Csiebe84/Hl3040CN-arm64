@@ -151,10 +151,15 @@ def read_markers(client: SnmpClient) -> list[Marker]:
     Raises:
         SnmpError: If the standard MIB cannot be read.
     """
-    descriptions = dict(client.walk(OID_SUPPLIES_DESCRIPTION))
-    types = dict(client.walk(OID_SUPPLIES_TYPE))
-    levels = dict(client.walk(OID_SUPPLIES_LEVEL))
-    capacities = dict(client.walk(OID_SUPPLIES_MAX_CAPACITY))
+    # RFC 3805 indexes the supplies table by
+    # `hrDeviceIndex.prtMarkerSuppliesIndex`, so a real printer answers
+    # `...43.11.1.1.6.1.1` and not `...6.1`. Key every column by that whole
+    # index; looking up only the last number silently loses the type and the
+    # capacity, which is how the drums and the belt came out as -1.
+    descriptions = _by_index(client.walk(OID_SUPPLIES_DESCRIPTION), OID_SUPPLIES_DESCRIPTION)
+    types = _by_index(client.walk(OID_SUPPLIES_TYPE), OID_SUPPLIES_TYPE)
+    levels = _by_index(client.walk(OID_SUPPLIES_LEVEL), OID_SUPPLIES_LEVEL)
+    capacities = _by_index(client.walk(OID_SUPPLIES_MAX_CAPACITY), OID_SUPPLIES_MAX_CAPACITY)
 
     # The toners are the whole reason this module exists; if that read fails we
     # still report the colours, names and types, which are the other half.
@@ -170,14 +175,13 @@ def read_markers(client: SnmpClient) -> list[Marker]:
         logger.warning("Brother private MIB not readable, toner levels stay unknown: %s", exc)
 
     markers: list[Marker] = []
-    for oid, raw_name in sorted(descriptions.items(), key=lambda item: _index(item[0])):
-        name = _text(raw_name)
+    for index in sorted(descriptions):
+        name = _text(descriptions[index])
         if not name:
             continue
-        index = _index(oid)
-        supply_type = SUPPLY_TYPES.get(int(types.get(_sibling(oid, OID_SUPPLIES_TYPE), 2)), "unknown")
-        level = int(levels.get(_sibling(oid, OID_SUPPLIES_LEVEL), -1))
-        capacity = int(capacities.get(_sibling(oid, OID_SUPPLIES_MAX_CAPACITY), 0))
+        supply_type = SUPPLY_TYPES.get(int(types.get(index, 2)), "unknown")
+        level = int(levels.get(index, -1))
+        capacity = int(capacities.get(index, 0))
 
         if (key := toner_key(name)) is not None and key in toner_percent:
             # The private MIB is authoritative for the toners.
@@ -190,17 +194,25 @@ def read_markers(client: SnmpClient) -> list[Marker]:
     return markers
 
 
-def _index(oid: str) -> int:
-    """Return the trailing table index of a column OID."""
-    try:
-        return int(oid.rsplit(".", 1)[1])
-    except (IndexError, ValueError):
-        return 0
+def _by_index(rows: list[tuple[str, object]], column: str) -> dict[tuple[int, ...], object]:
+    """Key a walked column by its full table index.
 
-
-def _sibling(oid: str, column: str) -> str:
-    """Rewrite a column OID to the same table index under another column."""
-    return f"{column}.{_index(oid)}"
+    A two-level index (`...6.1.1`) keeps both numbers; a flat one (`...6.1`)
+    keeps the single number. Both spellings then meet in the same dict without
+    one being mistaken for the other.
+    """
+    prefix = column + "."
+    keyed: dict[tuple[int, ...], object] = {}
+    for oid, value in rows:
+        if not oid.startswith(prefix):
+            continue
+        try:
+            index = tuple(int(part) for part in oid[len(prefix):].split("."))
+        except ValueError:
+            continue
+        if index:
+            keyed[index] = value
+    return keyed
 
 
 def _text(value: object) -> str:

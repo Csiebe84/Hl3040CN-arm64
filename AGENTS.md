@@ -37,8 +37,9 @@ Repository-specific knowledge for the Brother HL-3040CN driver port.
   ### Fund 1: alle vier Toner lesen `-1`
 
   Der Drucker laesst `prtMarkerSuppliesMaxCapacity` (1.3.6.1.2.1.43.11.1.1.8) bei
-  **allen vier** Tonerkartuschen auf **0**. CUPS rechnet den Prozentwert nur, wenn
-  es eine Kapazitaet hat - ohne sie publiziert es `-1` ("unbekannt"), und die
+  **allen vier** Tonerkartuschen auf **-2** ("none"). CUPS rechnet den Prozentwert
+  nur, wenn es eine Kapazitaet hat - ohne sie publiziert es `-1` ("unbekannt"),
+  und die
   Balken bleiben leer. Die echten Staende stehen in Brothers privater MIB
   (`1.3.6.1.4.1.2435.2.3.9.4.2.1.5.5.8.0`), die CUPS nie liest.
 
@@ -55,6 +56,32 @@ Repository-specific knowledge for the Brother HL-3040CN driver port.
   Colorant 3, den der Drucker "yellow" nennt - die Magenta-Saeule wird gelb
   gezeichnet und umgekehrt. Die Namen stimmen, die Farben nicht: ein Widerspruch
   in den Geraetedaten selbst.
+
+  ### Fund 3: der Tabellenindex ist zweistufig (fiel erst am echten Geraet auf)
+
+  Das war der Fehler, den der Simulator verdeckt hat. `prtMarkerSuppliesTable`
+  ist nach RFC 3805 ueber `hrDeviceIndex.prtMarkerSuppliesIndex` indiziert: ein
+  **echter** HL-3040CN antwortet auf einen Walk der Spalte `.6` mit `.6.1.1`
+  bis `.6.1.10`, nicht mit `.6.1` bis `.6.10`. Der Simulator antwortete
+  einstufig, und der alte Code nahm per `oid.rsplit(".", 1)[1]` nur die
+  **letzte** Zahl.
+
+  Folge am echten Geraet: jeder Typ-Lookup und jeder Kapazitaets-Lookup ging ins
+  Leere. Alle zehn Supplies kamen als `unknown` zurueck, und Belt plus die vier
+  Trommeln lasen `-1`, obwohl der Drucker echte Werte lieferte (Belt
+  20488/50000, Trommeln je 4083/15000). Der Tausch-Fix aus Fund 2 hat davon
+  nichts gemerkt - der rechnet nur mit dem Namen.
+
+  `_by_index()` behaelt jetzt den **ganzen** Index als Tupel. Beide
+  Schreibweisen landen in derselben Struktur, ohne dass eine fuer die andere
+  gehalten wird. `RealIndexLayoutTest` haelt die echten Druckerwerte fest und
+  `FlatIndexLayoutTest` sichert die einstufige Form ab, damit der Fix nicht das
+  eine gegen das andere tauscht. Gegen den alten Code schlaegt der Test fehl mit
+  `'unknown' != 'toner'` und `-1 != 40` - genau die Symptome vom Geraet.
+
+  **Lehre:** ein Simulator, den man selbst geschrieben hat, bestaetigt nur die
+  eigene Annahme. Der Index-Fehler war die ganze Zeit da und blieb unsichtbar,
+  bis der Drucker wirklich antwortete.
 
   ### Der Fix: der Filter meldet die Werte selbst
 
@@ -105,10 +132,23 @@ Repository-specific knowledge for the Brother HL-3040CN driver port.
   * **Achtung beim Testen:** `sudo -u lp` verwirft die Umgebung. `DEVICE_URI` und
     `PPD` muessen per `sudo -u lp env VAR=...` mitgegeben werden, sonst meldet der
     Filter "no network printer in DEVICE_URI=''" und der Test beweist nichts.
-  * Der Drucker ist derzeit **aus** (ARP `FAILED` auf 192.168.178.50, Ping 100 %
-    Verlust). Deshalb wurde gegen einen Agenten mit den echten Geraetedaten
-    getestet. Sobald er wieder da ist, zeigt `python3 marker.py 192.168.178.50`
-    die echten Staende.
+  * **Am echten Drucker nachgewiesen** (2026-10-31, 192.168.178.50). Ein echter
+    CUPS-Job (Nr. 126) lief durch, der Filter `exited with no errors`, und CUPS
+    meldet danach per `ipptool get-printer-attributes`:
+
+    ```
+    marker-levels  = 83,64,48,43,-1,40,27,27,27,27
+    marker-colors  = #000000,#00FFFF,#FF00FF,#FFFF00,none,none,#000000,...
+    marker-types   = toner,toner,toner,toner,waste-toner,other,opc,opc,opc,opc
+    ```
+
+    Vorher stand dort `-1,-1,-1,-1,-1,40,27,27,27,27` mit vertauschten Farben
+    (`#FFFF00` an Position 3). `marker-change-time` wandert mit, CUPS hat die
+    Werte also wirklich uebernommen und nicht nur zwischengespeichert.
+  * Die laufenden CUPS-Binaries wurden gegengeprueft, nicht nur die Quelle:
+    `strings /usr/sbin/cupsd` kennt `ATTR:`, `marker-names` und `marker-levels`;
+    `strings /usr/lib/cups/backend/socket` kennt `cupsSNMPSupplies` und
+    `prtMarkerSuppliesMaxCapacity`. Installierte Version: 2.4.2-3+deb12u9.
 
 ## Performance-Profil: Fine-Modus ist der Hebel (2026-10-30)
 Gemessen an `drucktest2.ps` (eine Letter-Seite, 4958x6981) auf dem Odroid N2+.

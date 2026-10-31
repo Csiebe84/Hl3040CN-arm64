@@ -162,10 +162,10 @@ PostScript ──gs──► PPM ──pipeline──► XL2HB bands ──socke
 CUPS publishes the toner bars itself, from the Printer MIB (RFC 3805). For
 this printer that goes wrong twice, so the driver reports the values instead.
 
-**All four toners read as unknown.** The printer leaves
-`prtMarkerSuppliesMaxCapacity` at 0 for every toner cartridge. CUPS only
-computes a percentage when it has a capacity, so it publishes `-1` for all
-four and the bars stay empty. The real figures are in Brother's private MIB
+**All four toners read as unknown.** The printer answers
+`prtMarkerSuppliesMaxCapacity` with `-2` ("none") for every toner cartridge.
+CUPS only computes a percentage when it has a capacity, so it publishes `-1`
+for all four and the bars stay empty. The real figures are in Brother's private MIB
 (`1.3.6.1.4.1.2435.2.3.9.4.2.1.5.5.8.0`), which CUPS never reads.
 
 **Magenta and yellow come out swapped.** CUPS takes each marker's colour from
@@ -175,13 +175,21 @@ supplies `…, Magenta Toner Cartridge, Yellow Toner Cartridge`. Supply 3
 therefore gets colorant 3, which the printer calls yellow — so the magenta bar
 is drawn yellow and the yellow bar magenta.
 
-The driver fixes both by emitting the attributes itself:
+**The supply table is indexed two levels deep.** RFC 3805 indexes
+`prtMarkerSuppliesTable` by `hrDeviceIndex.prtMarkerSuppliesIndex`, so this
+printer answers a walk of column `.6` with `.6.1.1` through `.6.1.10` — not
+`.6.1` through `.6.10`. Reading only the trailing number makes every type and
+capacity lookup miss, which leaves all ten supplies as `unknown` and the belt
+and the four drums at `-1`. Both spellings are handled now; the belt and the
+drums come out at 40 % and 27 % respectively.
+
+The driver fixes all three by emitting the attributes itself:
 
 ```
 ATTR: marker-colors=#000000,#00FFFF,#FF00FF,#FFFF00,none,…
 ATTR: marker-names='"Black Toner Cartridge"',…
 ATTR: marker-types=toner,toner,toner,toner,waste-toner,…
-ATTR: marker-levels=26,10,8,2,41,…
+ATTR: marker-levels=83,64,48,43,-1,40,27,27,27,27
 ```
 
 `scheduler/statbuf.c` recognises the `ATTR:` prefix on a filter's stderr and
@@ -192,6 +200,12 @@ daemon and no write into CUPS' state. The colours are derived from the supply
 `*cupsSNMPSupplies: false` in the PPD is part of the fix: without it the
 `socket` backend reads the same MIB and overwrites the corrected values with
 its own.
+
+Verified against the real printer: after a job, `ipptool get-printer-attributes`
+reports `marker-levels = 83,64,48,43,-1,40,27,27,27,27` with
+`marker-colors = #000000,#00FFFF,#FF00FF,#FFFF00,…` — magenta in position 3 and
+yellow in position 4, where CUPS previously had them the other way round and all
+four toners at `-1`.
 
 The readings themselves need SNMP, and this board has no `pysnmp`, so
 `snmp.py` is a small SNMP v1 client on the standard library. The decoder in
