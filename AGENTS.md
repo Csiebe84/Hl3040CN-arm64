@@ -28,6 +28,88 @@ Repository-specific knowledge for the Brother HL-3040CN driver port.
   Sobald Papier eingelegt ist, laeuft `tools/hw_verify.py` den Beweis
   (PAGECOUNT vor/nach).
 
+  ## Verbrauchsmaterial-Anzeige: zwei Fehler in CUPS, nicht im Treiber (2026-10-31)
+
+  Ausgangsfrage war, warum die Toner-Balken leer stehen und Magenta/Gelb
+  vertauscht sind. **Beides kommt von CUPS, nicht vom Drucker und nicht vom
+  Filter.**
+
+  ### Fund 1: alle vier Toner lesen `-1`
+
+  Der Drucker laesst `prtMarkerSuppliesMaxCapacity` (1.3.6.1.2.1.43.11.1.1.8) bei
+  **allen vier** Tonerkartuschen auf **0**. CUPS rechnet den Prozentwert nur, wenn
+  es eine Kapazitaet hat - ohne sie publiziert es `-1` ("unbekannt"), und die
+  Balken bleiben leer. Die echten Staende stehen in Brothers privater MIB
+  (`1.3.6.1.4.1.2435.2.3.9.4.2.1.5.5.8.0`), die CUPS nie liest.
+
+  Die Trommeln und die Belt-Unit haben dagegen eine Kapazitaet und werden korrekt
+  angezeigt - nur die Toner nicht. Genau das war der Hinweis: es liegt nicht am
+  SNMP-Zugriff (der funktioniert), sondern an der fehlenden Kapazitaet.
+
+  ### Fund 2: Magenta und Gelb sind vertauscht
+
+  CUPS nimmt die Farbe jedes Markers aus `prtMarkerColorantValue`, indiziert ueber
+  den **Colorant-Index** des Supplies. Dieser Drucker nummeriert seine Colorants
+  `1=black, 2=cyan, 3=yellow, 4=magenta`, benennt seine Supplies aber
+  `..., Magenta Toner Cartridge, Yellow Toner Cartridge`. Supply 3 bekommt also
+  Colorant 3, den der Drucker "yellow" nennt - die Magenta-Saeule wird gelb
+  gezeichnet und umgekehrt. Die Namen stimmen, die Farben nicht: ein Widerspruch
+  in den Geraetedaten selbst.
+
+  ### Der Fix: der Filter meldet die Werte selbst
+
+  `marker.py` liest Namen/Typen/Level aus der Standard-MIB und die Toner-Prozente
+  aus der Brother-MIB, und schreibt vier `ATTR:`-Zeilen auf stderr. CUPS liest sie:
+
+  * `scheduler/statbuf.c` erkennt das `ATTR:`-Praefix,
+  * `scheduler/job.c` (`CUPSD_LOG_ATTR`) legt jeden Wert per
+    `cupsdSetPrinterAttr` am Drucker ab.
+
+  Kein zusaetzlicher Daemon, kein Schreiben in den CUPS-Zustand. **Wichtig:** der
+  Filter bekommt den Druckerhost aus `DEVICE_URI` - CUPS reicht die Variable an
+  jeden Filter durch (`cupsdStartProcess(..., job->status_pipes[1], ...)`, siehe
+  `job.c`), nicht nur ans Backend. Ohne das muesste man den Host raten.
+
+  Die Farbe wird aus dem **Namen** abgeleitet, nicht aus der Colorant-Tabelle -
+  so kann sie nicht mehr auseinanderlaufen.
+
+  ### `*cupsSNMPSupplies: false` ist Teil des Fixes
+
+  Ohne das Keyword liest das `socket`-Backend dieselbe MIB und **ueberschreibt**
+  die korrigierten Werte mit seinen eigenen. Die Wache sitzt in
+  `backend_init_supplies` (`snmp-supplies.c`): nur wenn das PPD-Attribut fehlt
+  ODER `true` ist, wird ueberhaupt SNMP gefragt.
+
+  ### Werkzeuge
+
+  * `src/snmp.py` - SNMP-v1-Client (GET + GETNEXT-Walk) nur mit stdlib; dieses
+    Board hat kein `pysnmp`. Zeitbudget (`deadline`), damit ein toter Drucker den
+    Job nicht aufhaelt.
+  * `src/brsupply.py` - Decoder der Brother-Hexwoerter. Gegen die mitgelieferten
+    Geraetedaten der Apache-2.0-Bibliothek `brother` (bieniu/brother) geprueft:
+    **0 Abweichungen** bei 9 Prozenten und 4 Zaehlern.
+  * `src/marker.py` - der Emitter. `python3 marker.py <host>` zeigt, was der
+    Drucker meldet.
+
+  **Ein nicht antwortender Drucker ist kein Fehler:** die Meldung wird
+  uebersprungen, der Job laeuft normal weiter.
+
+  ### Nachgewiesen (nicht nur getestet)
+
+  * `test_supplies.py`: **68 Tests**, davon 6 fuer die Filter-Verdrahtung ueber
+    `DEVICE_URI`. Gesamtlauf `unittest discover -s hl3040cn/src`: **173 gruen**.
+  * **Ende-zu-Ende mit dem INSTALLIERTEN Filter als Benutzer `lp`**, echtem venv
+    und einem SNMP-Agent auf `127.0.0.1:161`: exit 0, 60014 B XL2HB und die vier
+    `ATTR:`-Zeilen mit `#FF00FF` an Position 3 (Magenta) und `#FFFF00` an
+    Position 4 (Gelb) - der Tausch ist weg.
+  * **Achtung beim Testen:** `sudo -u lp` verwirft die Umgebung. `DEVICE_URI` und
+    `PPD` muessen per `sudo -u lp env VAR=...` mitgegeben werden, sonst meldet der
+    Filter "no network printer in DEVICE_URI=''" und der Test beweist nichts.
+  * Der Drucker ist derzeit **aus** (ARP `FAILED` auf 192.168.178.50, Ping 100 %
+    Verlust). Deshalb wurde gegen einen Agenten mit den echten Geraetedaten
+    getestet. Sobald er wieder da ist, zeigt `python3 marker.py 192.168.178.50`
+    die echten Staende.
+
 ## Performance-Profil: Fine-Modus ist der Hebel (2026-10-30)
 Gemessen an `drucktest2.ps` (eine Letter-Seite, 4958x6981) auf dem Odroid N2+.
 

@@ -23,6 +23,14 @@
 *cupsVersion: 1.1
 *cupsManualCopies: false
 *cupsFilter: "application/vnd.cups-postscript 0 brhl3040cn-filter"
+*% CUPS reports supply levels itself, from the Printer MIB. For this printer
+*% that is wrong twice over: prtMarkerSuppliesMaxCapacity is 0 for all four
+*% toners, so every one of them comes out as -1, and the colorant table
+*% (1=black 2=cyan 3=yellow 4=magenta) disagrees with the supply names, so
+*% magenta and yellow are swapped. The filter publishes corrected values
+*% instead, and this keyword stops the backend from overwriting them.
+*% See src/marker.py.
+*cupsSNMPSupplies: false
 *cupsModelNumber: 4
 *ModelName: "Brother HL-3040CN"
 *ShortNickName: "HL-3040CN (Open Source)"

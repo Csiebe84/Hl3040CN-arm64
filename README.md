@@ -157,6 +157,58 @@ PostScript ──gs──► PPM ──pipeline──► XL2HB bands ──socke
   plane packing that make up the XL2HB payload.
 * `xl2hb.py`, `brother_encode.py` — protocol framing and the PJL wrapper.
 
+## Supply levels and the magenta/yellow swap
+
+CUPS publishes the toner bars itself, from the Printer MIB (RFC 3805). For
+this printer that goes wrong twice, so the driver reports the values instead.
+
+**All four toners read as unknown.** The printer leaves
+`prtMarkerSuppliesMaxCapacity` at 0 for every toner cartridge. CUPS only
+computes a percentage when it has a capacity, so it publishes `-1` for all
+four and the bars stay empty. The real figures are in Brother's private MIB
+(`1.3.6.1.4.1.2435.2.3.9.4.2.1.5.5.8.0`), which CUPS never reads.
+
+**Magenta and yellow come out swapped.** CUPS takes each marker's colour from
+`prtMarkerColorantValue`, indexed by the supply's colorant index. This printer
+numbers its colorants `1=black, 2=cyan, 3=yellow, 4=magenta` but names its
+supplies `…, Magenta Toner Cartridge, Yellow Toner Cartridge`. Supply 3
+therefore gets colorant 3, which the printer calls yellow — so the magenta bar
+is drawn yellow and the yellow bar magenta.
+
+The driver fixes both by emitting the attributes itself:
+
+```
+ATTR: marker-colors=#000000,#00FFFF,#FF00FF,#FFFF00,none,…
+ATTR: marker-names='"Black Toner Cartridge"',…
+ATTR: marker-types=toner,toner,toner,toner,waste-toner,…
+ATTR: marker-levels=26,10,8,2,41,…
+```
+
+`scheduler/statbuf.c` recognises the `ATTR:` prefix on a filter's stderr and
+`scheduler/job.c` stores each value on the printer, so this needs no extra
+daemon and no write into CUPS' state. The colours are derived from the supply
+*name*, which cannot disagree with itself, rather than from the colorant table.
+
+`*cupsSNMPSupplies: false` in the PPD is part of the fix: without it the
+`socket` backend reads the same MIB and overwrites the corrected values with
+its own.
+
+The readings themselves need SNMP, and this board has no `pysnmp`, so
+`snmp.py` is a small SNMP v1 client on the standard library. The decoder in
+`brsupply.py` is ported from the Apache-2.0 `brother` PyPI package
+(bieniu/brother) and is checked against that project's own captured printer
+payloads, so a wrong word layout fails a test rather than showing a wrong bar.
+
+To see what the printer reports:
+
+```bash
+cd hl3040cn/src
+python3 marker.py 192.168.178.50
+```
+
+A printer that does not answer is not an error: the report is skipped and the
+job prints normally.
+
 ## Development
 
 Tests live next to the code and run without a printer:

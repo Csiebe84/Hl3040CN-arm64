@@ -24,6 +24,7 @@ _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _SRC_DIR = os.path.join(os.path.dirname(_SCRIPT_DIR), "src")
 sys.path.insert(0, _SRC_DIR if os.path.isdir(_SRC_DIR) else _SCRIPT_DIR)
 
+from marker import host_from_device_uri, marker_lines  # noqa: E402
 from page_stream import iter_ppm_pages  # noqa: E402
 from pipeline import collect_rows, filter_pages, is_blank_page  # noqa: E402
 from settings import DuplexMode, PrintSettings, read_ppd_defaults  # noqa: E402
@@ -183,6 +184,28 @@ def drop_blank_pages(pages):
         yield width, height, rows
 
 
+def report_supplies() -> None:
+    """Publish the printer's supply levels to CUPS.
+
+    The lines go to stderr, where CUPS' scheduler picks up the ``ATTR:`` prefix
+    and stores the values on the printer. The host comes from the device URI,
+    which CUPS passes to every filter in the chain.
+
+    This never raises. A printer that does not answer, or a queue that is not on
+    the network, leaves CUPS' own values in place -- a print job must not fail
+    because a toner reading did not arrive.
+    """
+    device_uri = os.environ.get("DEVICE_URI", "")
+    host = host_from_device_uri(device_uri)
+    if not host:
+        logger.info("no network printer in DEVICE_URI=%r, skipping supply report", device_uri)
+        return
+    for line in marker_lines(host):
+        # flush: CUPS parses the pipe as the lines arrive, and this runs before
+        # Ghostscript, so an unflushed buffer would delay the whole job.
+        print(line, file=sys.stderr, flush=True)
+
+
 def main() -> None:
     # Parse CUPS filter arguments
     # Usage: filter job-id user title copies options [filename]
@@ -198,6 +221,14 @@ def main() -> None:
     input_file = sys.argv[6] if len(sys.argv) > 6 else None
 
     logger.info("job=%s user=%s title=%r copies=%d", job_id, user, title, copies)
+
+    # Report the supply levels before rasterising. CUPS reads these from the
+    # filter's stderr and stores them on the printer, replacing what its own
+    # backend would publish. It has to happen here rather than in the backend
+    # because the backend reports -1 for all four toners (the printer gives no
+    # capacity for them in the standard MIB) and swaps magenta and yellow;
+    # see marker.py for the full explanation.
+    report_supplies()
 
     # The queue's PPD defaults first (CUPS passes only the job's own
     # options), then the job options on top.
