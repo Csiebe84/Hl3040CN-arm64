@@ -141,6 +141,25 @@ without any app, using the built-in printing services:
 Verified end-to-end from a Pixel 7: the phone renders the job, the queue
 converts it to XL2HB and the printer's page counter advances.
 
+If the printer stops showing up in the phone's list even though mDNS looks
+healthy, check that the queue's default paper size matches the media it reports
+as loaded:
+
+```
+ipptool -tv ipp://<host>:631/printers/Brother_HL-3040CN gpa.test |
+    grep -E 'media-default|media-ready'
+```
+
+`media-default` must be a member of `media-ready`. cupsd builds `media-ready`
+from its `ReadyPaperSizes` list, which it derives from `DefaultPaperSize`; that
+is auto-detected from the locale (A4 for `de_DE`), so an A4 printer must not
+ship `*DefaultPageSize: Letter`. A default outside the ready list makes Mopria
+and AirPrint clients drop the printer. The queue can also carry a stale
+`media-empty-warning` in `printers.conf`; clear it with
+`lpadmin -p <queue> -E -o printer-state-reasons=none` (`lpadmin` needs its full
+path, `/usr/sbin/lpadmin`, since it is not on `$PATH`). See `AGENTS.md` for the
+full diagnosis.
+
 ## How it works
 
 ```

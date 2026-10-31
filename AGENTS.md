@@ -294,6 +294,41 @@ Gemessen an `drucktest2.ps` (eine Letter-Seite, 4958x6981) auf dem Odroid N2+.
 - HA (Supervisor) python3 also binds 0.0.0.0:5353; harmless, avahi answers fine.
 - File queue `HL3040_TEST` -> `/tmp/e2e_out.prn` is the paper-free test path.
 
+## Mopria regression 2026-10-31: two server-side defects, both fixed
+The printer was visible to the phone again after these. Both are *state* defects:
+the advert itself was always correct, so mDNS looked healthy while the IPP
+attributes were wrong.
+- **`media-default` disagreed with `media-ready`.** The PPD shipped
+  `*DefaultPageSize: Letter` on a German A4 printer. cupsd derives `media-ready`
+  from `ReadyPaperSizes`, which is built from `DefaultPaperSize`; that is
+  auto-detected from the locale (`de_DE` -> A4) as `A4,A3,A5,A6,EnvDL`. So the
+  queue advertised `media-default=na_letter_8.5x11in` while `media-ready` listed
+  only A4/A5/DL/A6 -- a default size the queue never reports as loaded. Mopria
+  and AirPrint clients drop such a printer. Fixed in the PPD:
+  `*DefaultPageSize`/`*DefaultImageableArea`/`*DefaultPaperDimension` Letter->A4.
+  Verify: `ipptool ... gpa.test | grep media-default` -> `iso_a4_210x297mm`, and
+  it must be a member of `media-ready`. Pinned by `DefaultMediaTest` in
+  `src/test_consistency.py` (fails if any of the three defaults goes back to
+  Letter).
+- **Stale `media-empty-warning`.** `/etc/cups/printers.conf` carried
+  `Reason media-empty-warning` although the printer reports no paper problem
+  (SNMP `hrPrinterDetectedErrorState` = `0x0000`; `prtInputCurrentLevel=0` is
+  "unknown", not "empty"). Two independent code paths can set it, and neither is
+  gated by the PPD's `*cupsSNMPSupplies: false` -- that attribute only guards
+  `backend_init_supplies()` (the marker-levels walk), while
+  `backendSNMPSupplies()` emits `STATE: +media-empty-warning` itself. The other
+  path is `runloop.c` on `ENOSPC`. Once set, the reason is *sticky*: it survives
+  until an explicit reset. Cleared with
+  `/usr/sbin/lpadmin -p Brother_HL-3040CN -E -o printer-state-reasons=none`
+  (note: `lpadmin` is not on `$PATH`, use the absolute path). Verify with
+  `ipptool ... | grep printer-state-reasons` -> `none`, and re-check after a real
+  job.
+- **Diagnostic lesson:** `STATE: +media-empty-warning` never appeared in
+  `error_log` for the affected jobs -- `envp[25]="PRINTER_STATE_REASONS=..."` on
+  Job 126 is the reason *inherited into* the job, not one the job set. Don't read
+  it as proof the backend set it; look for the `STATE:` line, and trust the
+  printer's own SNMP state (`0x0000` = healthy) over the queue's cached reason.
+
 ## Fine mode state (2026-10-28)
 - Oracle `/mnt/ssd/finecmp/s128_fine.xl2hb` (gray 128, Letter, Fine) is byte-identical
   decode target. Defect = Fine colour separation / 4bpp dither input + plane-presence rule,

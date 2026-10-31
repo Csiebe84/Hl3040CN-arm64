@@ -188,6 +188,40 @@ class PpCapabilityTest(unittest.TestCase):
         self.assertEqual(missing, set(), f"PageSize without PageRegion: {sorted(missing)}")
 
 
+class DefaultMediaTest(unittest.TestCase):
+    """The default page size must agree with CUPS' media-ready list.
+
+    cupsd picks `media-ready` from its `ReadyPaperSizes` array, which is derived
+    from `DefaultPaperSize`. That is auto-detected from the locale (A4 for
+    de_DE), so on this A4-only printer the ready list is A4,A5,DL,A6. A PPD
+    default of Letter then advertises `media-default=na_letter_8.5x11in`, a size
+    the queue never reports as loaded -- Mopria/AirPrint clients drop such a
+    printer from the discovery list. Both default keywords must name a size that
+    is in the PPD's own `media-ready` family, i.e. A4 here.
+    """
+
+    def ppd_default(self, keyword):
+        """Value of one `*Default<keyword>:` line."""
+        match = re.search(rf"^\*Default{keyword}:\s*(\S+)", PPD.read_text(encoding="latin-1"), re.M)
+        self.assertIsNotNone(match, f"*Default{keyword} is missing from the PPD")
+        return match.group(1)
+
+    def test_default_page_size_is_a4(self):
+        # The printer is sold and used in Germany; Letter is not loaded in it.
+        self.assertEqual(self.ppd_default("PageSize"), "A4")
+
+    def test_imageable_area_and_paper_dimension_follow(self):
+        # All three default keywords must agree, or cupstestppd flags a mismatch.
+        self.assertEqual(self.ppd_default("ImageableArea"), "A4")
+        self.assertEqual(self.ppd_default("PaperDimension"), "A4")
+
+    def test_default_is_in_the_cups_ready_list(self):
+        # CUPS builds ReadyPaperSizes from the locale (A4 for de_DE) as
+        # "A4,A3,A5,A6,EnvDL". A4 must be one of them, or media-default would
+        # name a size the queue never advertises as ready.
+        self.assertIn(self.ppd_default("PageSize"), {"A4", "A3", "A5", "A6", "EnvDL"})
+
+
 class FilterOptionsTest(unittest.TestCase):
     """Every PPD option group must be one the filter actually reads."""
 
