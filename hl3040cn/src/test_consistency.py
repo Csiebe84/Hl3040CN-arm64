@@ -211,15 +211,62 @@ class DefaultMediaTest(unittest.TestCase):
         self.assertEqual(self.ppd_default("PageSize"), "A4")
 
     def test_imageable_area_and_paper_dimension_follow(self):
-        # All three default keywords must agree, or cupstestppd flags a mismatch.
+        # All four default keywords must agree, or cupstestppd flags a mismatch.
         self.assertEqual(self.ppd_default("ImageableArea"), "A4")
         self.assertEqual(self.ppd_default("PaperDimension"), "A4")
+
+    def test_page_region_follows_the_page_size(self):
+        # PageRegion is the fourth geometry default and was the one left behind
+        # when the others were moved to A4: PageSize said A4 while PageRegion
+        # still said Letter. cupstestppd accepts that, so only this test catches
+        # it -- and the queue then resolves the region to Letter at job time.
+        self.assertEqual(self.ppd_default("PageRegion"), "A4")
+
+    def test_all_geometry_defaults_agree(self):
+        # One list so a future edit cannot move three of the four again.
+        values = {
+            keyword: self.ppd_default(keyword)
+            for keyword in ("PageSize", "PageRegion", "ImageableArea", "PaperDimension")
+        }
+        self.assertEqual(set(values.values()), {"A4"}, f"geometry defaults disagree: {values}")
 
     def test_default_is_in_the_cups_ready_list(self):
         # CUPS builds ReadyPaperSizes from the locale (A4 for de_DE) as
         # "A4,A3,A5,A6,EnvDL". A4 must be one of them, or media-default would
         # name a size the queue never advertises as ready.
         self.assertIn(self.ppd_default("PageSize"), {"A4", "A3", "A5", "A6", "EnvDL"})
+
+
+class InstalledPpdTest(unittest.TestCase):
+    """The copy install.sh ships must match the one in the repository.
+
+    install.sh copies cups/brhl3040cn.ppd to /usr/share/cups/model/ and builds
+    the queue from that copy. Fixing only the repository file therefore leaves
+    the installed queue on the old values -- which is exactly how the Letter
+    default survived a fix that had already landed: the repository PPD was
+    corrected, the installed copy was not. Skipped where CUPS is absent, so the
+    suite still runs on a machine without it.
+    """
+
+    INSTALLED = Path("/usr/share/cups/model/brhl3040cn.ppd")
+
+    def setUp(self):
+        if not self.INSTALLED.exists():
+            self.skipTest("no installed model PPD on this machine")
+
+    def geometry_defaults(self, path):
+        text = path.read_text(encoding="latin-1")
+        return {
+            keyword: re.search(rf"^\*Default{keyword}:\s*(\S+)", text, re.M).group(1)
+            for keyword in ("PageSize", "PageRegion", "ImageableArea", "PaperDimension")
+        }
+
+    def test_installed_ppd_matches_the_repository(self):
+        self.assertEqual(
+            self.geometry_defaults(self.INSTALLED),
+            self.geometry_defaults(PPD),
+            "the installed model PPD is out of step with cups/brhl3040cn.ppd",
+        )
 
 
 class FilterOptionsTest(unittest.TestCase):

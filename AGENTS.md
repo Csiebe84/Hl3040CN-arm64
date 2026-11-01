@@ -329,6 +329,53 @@ attributes were wrong.
   it as proof the backend set it; look for the `STATE:` line, and trust the
   printer's own SNMP state (`0x0000` = healthy) over the queue's cached reason.
 
+### Follow-up 2026-11-01: the fix above was incomplete in two ways
+
+"Als mopria kommt er wieder nicht" was reported again. The two defects from
+31.10. were fixed in the *repository* PPD only, so two copies of the state
+stayed wrong:
+
+- **`*DefaultPageRegion` was left on Letter.** `eaff8e7` moved `DefaultPageSize`,
+  `DefaultImageableArea` and `DefaultPaperDimension` to A4 but not
+  `DefaultPageRegion`. Measured on a throwaway queue: only `DefaultPageSize`
+  drives `media-default` -- with `PageSize: A4` and `PageRegion: Letter`, CUPS
+  still reports `media-default=iso_a4_210x297mm` after a restart. So the leftover
+  is invisible in the IPP attributes, but the region still resolves to a page the
+  printer never loads. `cupstestppd` accepts the mismatch too, which is why only
+  an explicit test catches it. Fixed: all four geometry defaults are A4, pinned
+  by `test_page_region_follows_the_page_size` and `test_all_geometry_defaults_agree`.
+- **`/usr/share/cups/model/brhl3040cn.ppd` was never updated.** That is the copy
+  `install.sh` installs and builds the queue from (`cp` in the script, then
+  `lpadmin -P`), and it still had all four defaults on Letter. Anyone re-running
+  `install.sh` would have recreated the original Mopria bug. Fixed, and
+  `InstalledPpdTest` now compares the installed copy against the repository one
+  (skipped when the file is absent, so the suite still runs without CUPS).
+
+**Verify after any PPD change:** the three copies must agree --
+`hl3040cn/cups/brhl3040cn.ppd`, `/usr/share/cups/model/brhl3040cn.ppd`,
+`/etc/cups/ppd/Brother_HL-3040CN.ppd`. Then `lpadmin -p Brother_HL-3040CN -P
+/usr/share/cups/model/brhl3040cn.ppd` to rebuild the queue, and
+`ipptool ... | grep -E 'media-default|media-ready'`.
+
+**On the reported symptom itself:** the printer at `.50` was off for the whole
+session (absent from ARP, `FAILED` neighbour entry, no mDNS advert of its own, no
+open 631/9100/515). Server side measured healthy throughout:
+`printer-state=idle`, `printer-state-reasons=none`,
+`media-default=iso_a4_210x297mm` inside `media-ready`, discovery complete
+(`_ipp`/`_ipps`/`_universal._sub._ipp`, `mopria-certified=1.3`,
+`urf-supported=V1.4,...`), IPP answers in ~50 ms. The phone last reached CUPS at
+00:09 (a `Get-Printer-Attributes` over IPPS, `successful-ok`) and never sent a
+job. **A printer that is switched off is not a driver defect** -- check the
+device before touching the server. The 61 finished-with-error jobs left in the
+queue from earlier tests do not block new ones (`which-jobs=pending` is empty);
+they are cosmetic but worth clearing before the next real test.
+
+**Tooling notes:** `lpadmin` is not on `$PATH` (`/usr/sbin/lpadmin`), and
+`systemctl reload cups` does not exist -- `cups.service` has no reload verb, use
+`systemctl restart cups` or a PPD change will not be picked up. A filter run
+takes `job-id user title copies options [file]`; swapping `title` and `copies`
+fails with `ValueError: invalid literal for int()`.
+
 ## Fine mode state (2026-10-28)
 - Oracle `/mnt/ssd/finecmp/s128_fine.xl2hb` (gray 128, Letter, Fine) is byte-identical
   decode target. Defect = Fine colour separation / 4bpp dither input + plane-presence rule,

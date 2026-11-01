@@ -77,7 +77,7 @@
 
 *OpenUI *PageRegion: PickOne
 *OrderDependency: 12 AnySetup *PageRegion
-*DefaultPageRegion: Letter
+*DefaultPageRegion: A4
 *PageRegion A4/A4:							"          "
 *PageRegion Letter/Letter:					"          "
 *PageRegion Legal/Legal:					"          "

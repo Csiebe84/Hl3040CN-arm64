@@ -160,6 +160,22 @@ and AirPrint clients drop the printer. The queue can also carry a stale
 path, `/usr/sbin/lpadmin`, since it is not on `$PATH`). See `AGENTS.md` for the
 full diagnosis.
 
+Only `*DefaultPageSize` drives `media-default`; the other three geometry
+defaults (`PageRegion`, `ImageableArea`, `PaperDimension`) do not, but they must
+still name the same size or CUPS resolves the region to a page the printer never
+loads. Fixing `PageSize` alone therefore leaves a broken queue that no IPP
+attribute reveals, which is how a `PageRegion: Letter` survived a fix that had
+already moved the other three to A4.
+
+The PPD exists in three places and all three matter: `cups/brhl3040cn.ppd` in
+this repository, `/usr/share/cups/model/brhl3040cn.ppd` (what `install.sh`
+copies and builds the queue from) and `/etc/cups/ppd/<queue>.ppd` (the live
+queue). Editing only the repository file leaves the installed queue on the old
+values; after changing the PPD, re-run `install.sh` or
+`lpadmin -p <queue> -P /usr/share/cups/model/brhl3040cn.ppd`. `InstalledPpdTest`
+in `src/test_consistency.py` compares the installed copy against the repository
+one so the two cannot drift apart unnoticed.
+
 ## How it works
 
 ```
