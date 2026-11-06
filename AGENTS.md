@@ -426,6 +426,37 @@ with the matching `page_size`.
 looks like it disables URF, but the cost-0 rule in `cupsfilters.convs` wins.
 No IPP path change is needed (`/ipp/print` works when the body URI names the queue).
 
+**Default printer (2026-11-06):** `CUPS-Get-Default` answered `client-error-not-found
+(No default printer.)` because none was set -- clients that ask for it got nothing.
+`lpadmin -d Brother_HL-3040CN` fixed it; it now returns `successful-ok` with the
+queue's URI. Not a driver bug and printing worked either way (mDNS advertises the
+queue), but there is no reason to leave the answer empty. `install.sh` now sets it
+in `--add-printer` too, so it survives a queue rebuild.
+
+## install.sh aborted before it finished installing (fixed 2026-11-06)
+
+The "Caching interpolation weight tables" step ran the venv interpreter **without
+a `cd`**, unlike the precompute step right above it. Its heredoc does
+`sys.path.insert(0, Path.cwd())` and `from color_lut_gen import ...`, so started
+from any directory other than `/usr/local/lib/brhl3040cn` the import fails with
+`ModuleNotFoundError: No module named 'color_lut_gen'`. Because the script runs
+under `set -e`, that aborted the run *before* the Cython build, the filter and the
+PPD were installed -- the first sign was only the traceback. Wrapped in
+`(cd "$LIB_DIR" && ...)`; the regenerated `interp_tables.bin` is byte-identical
+(md5 `59e39ed44aac52b39d9fe00b5857a241`, 44217 B).
+
+`InstallScriptTest` now asserts every `$VENV_DIR/bin/python3` line either cd's
+itself or is a known wrapper, and that the filter/Cython steps still come after the
+LUT cache. Verified to fail against the previous script.
+
+**Run `install.sh` from any directory, not just the repo root** -- that is the bug
+this fixes. The Cython step at the end still compiles, so per Rule Nr. 1 do not run
+the full installer on the Odroid; build in CI and only exercise the Python steps.
+
+**Disk:** `/` is the micro SD and sits at ~88 % (3.7 GB free) with 257 MB of colour
+tables under `/usr/local/lib/brhl3040cn/color_data`. Worth watching, but not
+touched here.
+
 ## Fine mode state (2026-10-28)
 - Oracle `/mnt/ssd/finecmp/s128_fine.xl2hb` (gray 128, Letter, Fine) is byte-identical
   decode target. Defect = Fine colour separation / 4bpp dither input + plane-presence rule,

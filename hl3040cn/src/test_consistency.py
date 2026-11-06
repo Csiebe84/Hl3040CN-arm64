@@ -330,6 +330,54 @@ class CupsCertificateTest(unittest.TestCase):
         )
 
 
+class InstallScriptTest(unittest.TestCase):
+    """install.sh must not run Python from a directory it does not control.
+
+    The interpolation-table step used to invoke the interpreter from whatever
+    directory the caller happened to be in. Its heredoc imports color_lut_gen
+    and writes color_data/interp_tables.bin relative to the working directory,
+    so the import failed unless install.sh was started from the library
+    directory -- and `set -e` then aborted the install before the filter, the
+    PPD and the Cython build were put in place.
+    """
+
+    INSTALL = ROOT / "cups" / "install.sh"
+
+    def setUp(self):
+        self.text = self.INSTALL.read_text(encoding="utf-8")
+
+    def python_invocations(self):
+        """Every command line in install.sh that runs the venv interpreter."""
+        return [
+            line.strip()
+            for line in self.text.splitlines()
+            if "$VENV_DIR/bin/python3" in line and not line.strip().startswith("#")
+        ]
+
+    def test_venv_python_always_runs_in_a_known_directory(self):
+        for line in self.python_invocations():
+            # Either the line cd's itself, or it is the wrapper the filter
+            # itself runs through (which sets its own paths).
+            if "$LIB_DIR/brhl3040cn-filter.py" in line or "-m compileall" in line:
+                continue
+            self.assertIn(
+                'cd "',
+                line,
+                f"runs the venv python without a known working directory: {line}",
+            )
+
+    def test_the_install_steps_that_follow_the_lut_cache_still_exist(self):
+        # Guard against a future edit that moves the abort-prone step last
+        # without noticing it takes the rest of the install with it.
+        lut_cache = self.text.index("Caching interpolation weight tables")
+        for later in ("Building Cython acceleration", "brhl3040cn-filter"):
+            self.assertGreater(
+                self.text.index(later),
+                lut_cache,
+                f"{later!r} is expected to come after the LUT cache step",
+            )
+
+
 class FilterOptionsTest(unittest.TestCase):
     """Every PPD option group must be one the filter actually reads."""
 

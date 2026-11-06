@@ -125,8 +125,12 @@ fi
 # once avoids recomputing it on every job and silences the "generating
 # analytically" line. color_data/ is gitignored (Brother's tables are not
 # redistributed), so this has to happen here, not in the repository.
+# Run from $LIB_DIR, like the precompute step above: the heredoc imports
+# color_lut_gen and writes color_data/interp_tables.bin relative to the working
+# directory, so from anywhere else the import fails and `set -e` aborts the
+# install right here -- leaving the filter, PPD and Cython build uninstalled.
 echo "Caching interpolation weight tables..."
-"$VENV_DIR/bin/python3" - <<'PY'
+(cd "$LIB_DIR" && "$VENV_DIR/bin/python3" - <<'PY'
 import sys
 from pathlib import Path
 
@@ -141,6 +145,7 @@ else:
     target.write_bytes(generate_interp_tables().tobytes())
     print(f"  Wrote {target} ({target.stat().st_size} bytes).")
 PY
+)
 
 echo "Building Cython acceleration..."
 BUILD_DIR="$(mktemp -d)"
@@ -216,7 +221,10 @@ if $ADD_PRINTER; then
         -o print-quality-default=5 \
         -D "Brother HL-3040CN (Open Source)" \
         -L "Network Printer"
-    echo "  Queue created."
+    # Clients that ask CUPS-Get-Default (Android/Mopria do) get
+    # client-error-not-found without this, so answer them with the queue.
+    lpadmin -d "$QUEUE_NAME"
+    echo "  Queue created (and set as default)."
 else
     echo "To create a queue, run:"
     echo "  sudo $0 --add-printer"
@@ -224,4 +232,5 @@ else
     echo "  sudo lpadmin -p $QUEUE_NAME -E -v $DEFAULT_URI \\"
     echo "    -P $CUPS_PPD_DIR/brhl3040cn.ppd -o print-quality-default=5 \\"
     echo "    -D 'Brother HL-3040CN (Open Source)'"
+    echo "  sudo lpadmin -d $QUEUE_NAME   # so CUPS-Get-Default answers"
 fi
