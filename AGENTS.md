@@ -376,6 +376,56 @@ they are cosmetic but worth clearing before the next real test.
 takes `job-id user title copies options [file]`; swapping `title` and `copies`
 fails with `ValueError: invalid literal for int()`.
 
+## CUPS TLS certificate was self-signed (fixed 2026-11-06)
+
+`/etc/cups/ssl/odroidn2.crt` was self-signed (`subject == issuer`), so any client
+that trusts only the local CA -- Android in particular -- aborted IPPS with
+`self-signed certificate` (OpenSSL `verify error 18`). nginx served a CA-signed
+leaf from the same `Odroid N2 Local CA` the whole time, which is why HTTPS looked
+healthy and only the printer path was affected. Measured, not assumed:
+
+    echo | openssl s_client -connect 127.0.0.1:631 -servername odroidn2 \
+        -CAfile /etc/nginx/ssl/ca.crt 2>&1 | grep "Verify return code"
+    # before: 18 (self-signed certificate)   after: 0 (ok)
+
+The old CUPS leaf also carried **no IP SAN at all** (only `DNS:odroidn2`,
+`odroidn2.local`, `localhost`), so `ipps://192.168.178.71:631` could not match it
+by address either. The replacement is signed by the local CA and carries
+`DNS:odroidn2,odroidn2.local,odroidn2.fritz.box` plus `IP:127.0.0.1,192.168.178.71`.
+The leaf is stored **concatenated with the CA** so a client can build the chain
+without having the CA in its trust store.
+
+This is now permanent: `renew_local_ca_leaf.sh` used to sign only the nginx leaf,
+so a renewal would have left CUPS self-signed again. It now writes the CUPS copy
+too and restarts cupsd -- but only when `lpstat -W not-completed -o` is empty,
+since `cups.service` has no reload verb and a restart would kill a running job.
+Backups: `/root/backup-cups-ssl-20261106-021900/`,
+`/root/renew_local_ca_leaf.sh.bak-20261106-022254`.
+
+**Do not read `is-active cups` as proof the cert is right** -- cupsd happily serves
+the self-signed one; only `s_client ... -CAfile` against the local CA shows it.
+
+## A printer that is off does not lose the job (2026-11-06)
+
+Simulated with the queue pointed at a closed port and a listener started later:
+the job stayed `printer-state=processing`, `queued-job-count=1`, logged
+`Connection error: Host is down` every ~10-20 s, and was **delivered automatically**
+once the port opened (`Job completed`, backend exited 0). So a job submitted while
+.50 is off is not lost and needs no manual re-send -- it prints when the printer
+comes back. `ErrorPolicy retry-job` in `cupsd.conf` is what makes this work.
+
+**Full PDL check (all pass, file queue, no paper used):** PDF 14130 B, PWG-Raster
+19618 B, JPEG 4398 B, PNG 2770 B, `copies=3` -> `total pages: 3`, and
+`print-color-mode=monochrome` really does change the output (14111 vs 14130 B).
+CUPS picks `rastertopdf (image/urf to application/pdf, cost 0)` for URF, so the
+advertised `image/urf`/`image/pwg-raster` in `pdl=` are genuinely convertible.
+Media is not regressed by the A4 default: A4/Letter/Legal/A5 each reach the filter
+with the matching `page_size`.
+
+**Note:** `image/urf -> application/pdf 100 -` in `/usr/share/cups/mime/mime.convs`
+looks like it disables URF, but the cost-0 rule in `cupsfilters.convs` wins.
+No IPP path change is needed (`/ipp/print` works when the body URI names the queue).
+
 ## Fine mode state (2026-10-28)
 - Oracle `/mnt/ssd/finecmp/s128_fine.xl2hb` (gray 128, Letter, Fine) is byte-identical
   decode target. Defect = Fine colour separation / 4bpp dither input + plane-presence rule,

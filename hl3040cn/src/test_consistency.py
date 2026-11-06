@@ -17,6 +17,7 @@ invisible at install time:
 import importlib.machinery
 import importlib.util
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -266,6 +267,66 @@ class InstalledPpdTest(unittest.TestCase):
             self.geometry_defaults(self.INSTALLED),
             self.geometry_defaults(PPD),
             "the installed model PPD is out of step with cups/brhl3040cn.ppd",
+        )
+
+
+class CupsCertificateTest(unittest.TestCase):
+    """cupsd must not serve a certificate the local CA did not sign.
+
+    cupsd writes itself a self-signed certificate into /etc/cups/ssl/<host>.crt
+    when none is present, and it happily keeps serving that one. A client that
+    trusts only the local CA -- Android on the IPPS path -- then aborts the
+    connection, while HTTPS stays healthy because nginx has a proper leaf. The
+    failure is invisible in `systemctl is-active cups`, so it needs a test.
+
+    Skipped wherever CUPS or the local CA is absent.
+    """
+
+    CUPS_CERT = Path("/etc/cups/ssl/odroidn2.crt")
+    CA_CERT = Path("/etc/nginx/ssl/ca.crt")
+
+    def setUp(self):
+        for path in (self.CUPS_CERT, self.CA_CERT):
+            if not path.exists():
+                self.skipTest(f"{path} not present on this machine")
+
+    def openssl(self, *args):
+        return subprocess.run(
+            ["openssl", *args], capture_output=True, text=True, timeout=30
+        )
+
+    def test_certificate_is_signed_by_the_local_ca(self):
+        issuer = self.openssl("x509", "-in", str(self.CUPS_CERT), "-noout", "-issuer")
+        subject = self.openssl("x509", "-in", str(self.CUPS_CERT), "-noout", "-subject")
+        self.assertNotEqual(
+            issuer.stdout.strip().removeprefix("issuer="),
+            subject.stdout.strip().removeprefix("subject="),
+            "the CUPS certificate is self-signed; IPPS clients that trust only "
+            "the local CA will reject it",
+        )
+
+    def test_certificate_chain_verifies_against_the_local_ca(self):
+        # The leaf is stored with the CA appended, so -untrusted supplies the
+        # chain for a client that does not hold the CA itself.
+        result = self.openssl(
+            "verify",
+            "-CAfile",
+            str(self.CA_CERT),
+            "-untrusted",
+            str(self.CUPS_CERT),
+            str(self.CUPS_CERT),
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_certificate_covers_the_lan_address(self):
+        text = self.openssl(
+            "x509", "-in", str(self.CUPS_CERT), "-noout", "-ext", "subjectAltName"
+        ).stdout
+        addresses = re.findall(r"IP Address:(\S+)", text)
+        self.assertTrue(
+            any(addr.startswith("192.168.178.") for addr in addresses),
+            f"the CUPS certificate has no LAN IP SAN, so IPPS by address cannot "
+            f"match it (found: {addresses})",
         )
 
 
