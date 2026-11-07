@@ -40,6 +40,13 @@ writes an `@PJL JOB` line that this driver omits. The printer accepts both.
 * Optional: a C compiler and `cython` for the accelerated hot paths
   (the driver falls back to pure Python if they are missing)
 
+The acceleration kernels (dither, colour separation, RLE, band rendering,
+Fine-mode encoding) are being ported from Cython to **Rust/PyO3** so the
+driver needs no C toolchain at install time. The port is a drop-in
+replacement — same module names, same signatures — and is verified byte
+for byte against the Python reference; see `hl3040cn/rust/README.md`.
+`install.sh` still builds the Cython kernels until the port is merged.
+
 Disk use is about 130 MB after installation, most of it the precomputed
 inverse colour lookup tables.
 

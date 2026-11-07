@@ -640,3 +640,40 @@ Level `b8` vs `b0`). Der Auftrag nennt ausdruecklich, was **nicht** zu wiederhol
 ist (falsche Tabellen, reine Level-Transformation, Phasenfehler, Encoder) und wo
 die Harnesse liegen (`/mnt/ssd/finecmp/`, reboot-fest). Orakel-Container
 `brother-cups` laeuft; Drucker `.50:9100` erreichbar.
+
+## Rust-Port der Cython-Kernel (2026-11-01)
+
+**Ziel:** die 5 Cython-Kernel (`_rle_fast`, `_dither_fast`, `_band_fast`,
+`_color_fast`, `_fine_fast`, zusammen 1597 Zeilen `.pyx`) durch **eine** Rust-
+Extension ersetzen, damit der Installer keinen C-Compiler und kein `cython`
+mehr braucht und Wheels fuer beliebige Architekturen moeglich werden. Branch
+`feat/rust-kernels` (privat), **nicht** nach `master` gemergt - erst wenn die
+Suite gegen die native Extension komplett gruen ist.
+
+**Layout:** `hl3040cn/rust/` (Crate `hl3040cn-native`, cdylib `_hl3040cn_native`),
+`src/lib.rs` registriert alle 13 Funktionen, `shims/_*_fast.py` exportieren sie
+unter den **alten Modulnamen** -> kein Call-Site-Aenderung. Details + API-Tabelle:
+`hl3040cn/rust/README.md`.
+
+**Geladen wird aus `src/`:** der Treiber importiert die Kernel neben den
+Python-Modulen und faellt bei `ImportError` auf Python zurueck. Also
+`lib_hl3040cn_native.so` -> `src/_hl3040cn_native.so` kopieren, Shims als
+`_*_fast.py` daneben. `maturin` verpackt als Paketverzeichnis - **nicht** nehmen,
+das ist nicht der Ladepfad.
+
+**CI = der einzige Compiler.** `.github/workflows/rust-kernels.yml` baut per
+`cargo build --release`, staged Modul + Shims, **bestaetigt dass die native
+`.so` importiert wurde** (nicht der Fallback) und laeuft die volle Suite
+(191 Tests). Der reine `tests.yml`-Workflow bleibt pure-Python und kann gruen
+sein, obwohl ein Kernel nicht mal kompiliert - deshalb dieser zweite Job.
+
+**Lektion (CI-Fehler 1):** `#[pyfunction]` mit geborgten Argumenten
+(`&[u8]`, `&Bound<..>`) braucht einen **benannten** Lifetime, an `Python<'py>`
+gebunden - `Bound<'_, PyBytes>` als Rueckgabe kompiliert nicht (E0106) und
+kollidiert mit pyo3s `wrap` (E0034). Muster: `pub fn f<'py>(py: Python<'py>,
+data: &[u8]) -> PyResult<Bound<'py, PyBytes>>`.
+
+**Blob-Luecke:** die dither/color/band-Tests brauchen `src/lut/` +
+`src/color_data/` (nicht im Repo), werden in CI also **uebersprungen** - der
+native Pfad dieser 4 Kernel war dort unbelegt. `test_native_kernels_equiv.py`
+schliesst das mit synthetischen Eingaben gegen die Python-Referenzen.
