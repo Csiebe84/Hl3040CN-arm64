@@ -677,3 +677,13 @@ data: &[u8]) -> PyResult<Bound<'py, PyBytes>>`.
 `src/color_data/` (nicht im Repo), werden in CI also **uebersprungen** - der
 native Pfad dieser 4 Kernel war dort unbelegt. `test_native_kernels_equiv.py`
 schliesst das mit synthetischen Eingaben gegen die Python-Referenzen.
+
+**Stand 2026-11-01, CI gruen (rust-kernels #7 + tests #38):** alle 5 Kernel
+portiert, `cargo build` baut die `.so`, CI laedt sie und faehrt **212 Tests**
+(191 + 21 neue). Der blobs-freie `test_native_kernels_equiv.py` belegt
+dither/color/rle/band **gegen die Rust-Kernel** (21 Tests, alle ok) - vorher
+liefen diese in CI nur als Skip. `install.sh` baut jetzt bevorzugt Rust
+(cargo vorhanden -> `lib_hl3040cn_native.so` -> `_hl3040cn_native.so`, alte
+Cython-`.so` werden geparkt, weil eine Extension den `.py`-Shim beschatten
+wuerde), faellt sonst auf Cython zurueck. Branch `feat/rust-kernels` ist
+funktional fertig; **Merge nach `master` steht noch aus** (Nutzer-Entscheid).
