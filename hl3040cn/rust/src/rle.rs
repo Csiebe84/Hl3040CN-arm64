@@ -52,7 +52,6 @@ pub fn group_bits(py: Python<'_>, data: &[u8], group_size: i32) -> PyResult<Py<P
     let gs = group_size as usize;
     let n_full = total_bits / gs;
     let remaining = total_bits - n_full * gs;
-    let total = n_full + usize::from(remaining > 0);
     let mask: u64 = (1u64 << group_size) - 1;
 
     let out = pyo3::types::PyList::empty(py);
@@ -87,7 +86,11 @@ pub fn group_bits(py: Python<'_>, data: &[u8], group_size: i32) -> PyResult<Py<P
 
 /// Pack a list of N-bit values into bytes, MSB-first.
 #[pyfunction]
-pub fn pack_groups(py: Python<'_>, groups: &Bound<'_, PyAny>, group_size: i32) -> PyResult<Bound<'_, PyBytes>> {
+pub fn pack_groups<'py>(
+    py: Python<'py>,
+    groups: &Bound<'py, PyAny>,
+    group_size: i32,
+) -> PyResult<Bound<'py, PyBytes>> {
     let n = groups.len()?;
     if n == 0 {
         return Ok(PyBytes::new(py, &[]));
@@ -484,7 +487,7 @@ pub fn encode_line(p: &[u8], bits: i32, o: &mut OutBuf) -> usize {
 
 /// Encode one plane scanline with the sliding-window RLE, incl. raw fallback.
 #[pyfunction]
-pub fn encode_sw_rle(py: Python<'_>, data: &[u8], bits: i32) -> PyResult<Bound<'_, PyBytes>> {
+pub fn encode_sw_rle<'py>(py: Python<'py>, data: &[u8], bits: i32) -> PyResult<Bound<'py, PyBytes>> {
     if bits != 10 && bits != 12 && bits != 20 {
         return Err(PyValueError::new_err(format!("unsupported word size {bits}")));
     }
