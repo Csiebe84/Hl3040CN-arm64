@@ -169,7 +169,8 @@ if [ -d "$REPO_ROOT/rust" ] && command -v cargo >/dev/null 2>&1; then
 fi
 
 if [ "$KERNELS_BUILT" -eq 0 ]; then
-    echo "  cargo unavailable or build failed; building Cython kernels..."
+    echo "Building Cython acceleration..."
+    echo "  (cargo unavailable or the Rust build failed; falling back)"
     BUILD_DIR="$(mktemp -d)"
     mkdir -p "$BUILD_DIR/src"
     cp "$REPO_ROOT/setup_cython.py" "$BUILD_DIR/" 2>/dev/null || true
