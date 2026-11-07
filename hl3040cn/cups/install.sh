@@ -147,37 +147,60 @@ else:
 PY
 )
 
-echo "Building Cython acceleration..."
-BUILD_DIR="$(mktemp -d)"
-mkdir -p "$BUILD_DIR/src"
-cp "$REPO_ROOT/setup_cython.py" "$BUILD_DIR/" 2>/dev/null || true
-cp "$REPO_ROOT/src/"_*_fast.pyx "$BUILD_DIR/src/" 2>/dev/null || true
-cp "$REPO_ROOT/src/"_*_fast.pxd "$BUILD_DIR/src/" 2>/dev/null || true
-# --force: setuptools skips a .pyx whose .c file is newer and never
-# notices a .pxd edit, so an incremental build can leave a stale .so.
-if "$VENV_DIR/bin/pip" install --quiet cython setuptools \
-    && (cd "$BUILD_DIR" && "$VENV_DIR/bin/python3" setup_cython.py build_ext --inplace --force >/dev/null 2>&1) \
-    && compgen -G "$BUILD_DIR/src/_*_fast*.so" >/dev/null; then
-    cp "$BUILD_DIR/src/"_*_fast*.so "$LIB_DIR/"
-    echo "  Cython extensions installed."
-else
-    # A stale .so is worse than none: an old module whose signature no longer
-    # matches pipeline.py aborts every job that uses it.  This happened once --
-    # an 18-argument _band_fast broke Normal mode, while Fine (which never calls
-    # it) kept working, so the queue looked healthy.  Quarantine whatever is
-    # installed and let the pure-Python fallback run; it is byte-identical,
-    # just slower.
-    if compgen -G "$LIB_DIR/_*_fast*.so" >/dev/null; then
-        STALE_DIR="$LIB_DIR/.stale-so-$(date +%Y%m%d-%H%M%S)"
-        mkdir -p "$STALE_DIR"
-        mv "$LIB_DIR/"_*_fast*.so "$STALE_DIR/"
-        echo "  WARNING: Cython build failed; pure-Python fallback will be used."
-        echo "           Stale extensions quarantined in $STALE_DIR."
-    else
-        echo "  WARNING: Cython build failed; pure-Python fallback will be used."
+echo "Building acceleration kernels..."
+KERNELS_BUILT=0
+# Prefer Rust: no C compiler and no cython.  Fall back to the Cython kernels
+# when cargo is missing or the build fails -- the pure-Python path is
+# byte-identical, just slower.
+if [ -d "$REPO_ROOT/rust" ] && command -v cargo >/dev/null 2>&1; then
+    if (cd "$REPO_ROOT/rust" && cargo build --release >/dev/null 2>&1); then
+        # A stale Cython .so would shadow the shim: an extension module wins
+        # over a .py of the same name.  Park them first.
+        if compgen -G "$LIB_DIR/_*_fast*.so" >/dev/null; then
+            STALE_DIR="$LIB_DIR/.stale-so-$(date +%Y%m%d-%H%M%S)"
+            mkdir -p "$STALE_DIR"
+            mv "$LIB_DIR/"_*_fast*.so "$STALE_DIR/"
+        fi
+        cp "$REPO_ROOT/rust/target/release/lib_hl3040cn_native.so" "$LIB_DIR/_hl3040cn_native.so"
+        cp "$REPO_ROOT/rust/shims/"_*_fast.py "$LIB_DIR/" 2>/dev/null || true
+        echo "  Rust kernels installed."
+        KERNELS_BUILT=1
     fi
 fi
-rm -rf "$BUILD_DIR"
+
+if [ "$KERNELS_BUILT" -eq 0 ]; then
+    echo "  cargo unavailable or build failed; building Cython kernels..."
+    BUILD_DIR="$(mktemp -d)"
+    mkdir -p "$BUILD_DIR/src"
+    cp "$REPO_ROOT/setup_cython.py" "$BUILD_DIR/" 2>/dev/null || true
+    cp "$REPO_ROOT/src/"_*_fast.pyx "$BUILD_DIR/src/" 2>/dev/null || true
+    cp "$REPO_ROOT/src/"_*_fast.pxd "$BUILD_DIR/src/" 2>/dev/null || true
+    # --force: setuptools skips a .pyx whose .c file is newer and never
+    # notices a .pxd edit, so an incremental build can leave a stale .so.
+    if "$VENV_DIR/bin/pip" install --quiet cython setuptools \
+        && (cd "$BUILD_DIR" && "$VENV_DIR/bin/python3" setup_cython.py build_ext --inplace --force >/dev/null 2>&1) \
+        && compgen -G "$BUILD_DIR/src/_*_fast*.so" >/dev/null; then
+        cp "$BUILD_DIR/src/"_*_fast*.so "$LIB_DIR/"
+        echo "  Cython extensions installed."
+    else
+        # A stale .so is worse than none: an old module whose signature no longer
+        # matches pipeline.py aborts every job that uses it.  This happened once --
+        # an 18-argument _band_fast broke Normal mode, while Fine (which never calls
+        # it) kept working, so the queue looked healthy.  Quarantine whatever is
+        # installed and let the pure-Python fallback run; it is byte-identical,
+        # just slower.
+        if compgen -G "$LIB_DIR/_*_fast*.so" >/dev/null; then
+            STALE_DIR="$LIB_DIR/.stale-so-$(date +%Y%m%d-%H%M%S)"
+            mkdir -p "$STALE_DIR"
+            mv "$LIB_DIR/"_*_fast*.so "$STALE_DIR/"
+            echo "  WARNING: Cython build failed; pure-Python fallback will be used."
+            echo "           Stale extensions quarantined in $STALE_DIR."
+        else
+            echo "  WARNING: Cython build failed; pure-Python fallback will be used."
+        fi
+    fi
+    rm -rf "$BUILD_DIR"
+fi
 
 echo "Installing CUPS filter to $CUPS_FILTER_DIR..."
 mkdir -p "$CUPS_FILTER_DIR"
