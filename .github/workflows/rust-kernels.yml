@@ -32,8 +32,6 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -45,38 +43,36 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('hl3040cn/rust/Cargo.toml') }}
 
       - name: Install dependencies
-        run: pip install --quiet numpy maturin
+        run: pip install --quiet numpy
 
       - name: Install Ghostscript
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ghostscript
 
-      # maturin builds the cdylib and drops it in the source tree as
-      # `_hl3040cn_native`, next to the Python modules.
+      # cargo, not maturin: the wheel layout is not what the driver loads.  The
+      # driver imports the kernels from `src/` next to the Python modules, so the
+      # cdylib is copied there as a plain `_hl3040cn_native.so`.
       - name: Build the Rust extension
         working-directory: hl3040cn/rust
-        run: maturin build --release --out /tmp/wheels
+        run: cargo build --release
 
-      - name: Install the wheel
-        run: pip install --force-reinstall --no-deps /tmp/wheels/*.whl
-
-      # The shims carry the old module names; install them next to the sources
-      # so `import _rle_fast` resolves to the Rust implementation.
-      - name: Install the module shims
-        run: cp hl3040cn/rust/shims/_*_fast.py hl3040cn/src/
+      - name: Stage the native module and the shims
+        run: |
+          cp hl3040cn/rust/target/release/lib_hl3040cn_native.so hl3040cn/src/_hl3040cn_native.so
+          cp hl3040cn/rust/shims/_*_fast.py hl3040cn/src/
+          ls -l hl3040cn/src/_hl3040cn_native.so
 
       - name: Prove the kernels are the native ones
         working-directory: hl3040cn/src
         run: |
           python3 - <<'PY'
           import _hl3040cn_native, _rle_fast, _fine_fast, _band_fast, _color_fast, _dither_fast
-          import _hl3040cn_native as n
-          print("native module file:", n.__file__)
-          assert n.__file__.endswith((".so", ".pyd")), n.__file__
+          assert _hl3040cn_native.__file__.endswith(".so"), _hl3040cn_native.__file__
+          print("native module:", _hl3040cn_native.__file__)
           for mod in (_rle_fast, _fine_fast, _band_fast, _color_fast, _dither_fast):
               print("shim ok:", mod.__name__, "->", mod.__file__)
           PY
 
-      - name: Kernel parity (golden corpus + signature)
+      - name: Kernel parity (signature guard + golden corpus)
         working-directory: hl3040cn/src
         run: |
           python3 -m unittest test_kernel_signature -v
