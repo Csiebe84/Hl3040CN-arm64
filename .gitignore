@@ -40,3 +40,6 @@ prompts/
 # --- Local pre-change backups (kept on disk, not in history) ---
 backup-*/
 *.vor-*
+
+# --- Rust build artefacts ---
+hl3040cn/rust/target/

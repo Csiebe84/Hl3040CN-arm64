@@ -1,0 +1,20 @@
+[package]
+name = "hl3040cn-native"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.74"
+description = "Native acceleration kernels for the Brother HL-3040CN CUPS driver"
+license = "GPL-3.0-or-later"
+
+[lib]
+name = "_hl3040cn_native"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.23", features = ["extension-module"] }
+numpy = "0.23"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

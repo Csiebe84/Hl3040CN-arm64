@@ -1,0 +1,14 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "hl3040cn-native"
+version = "1.0.0"
+description = "Native acceleration kernels for the Brother HL-3040CN CUPS driver"
+requires-python = ">=3.11"
+license = { text = "GPL-3.0-or-later" }
+
+[tool.maturin]
+module-name = "_hl3040cn_native"
+manifest-path = "Cargo.toml"
