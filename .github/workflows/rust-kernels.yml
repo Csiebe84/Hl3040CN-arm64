@@ -82,6 +82,9 @@ jobs:
         working-directory: hl3040cn/src
         run: python3 -m unittest discover -p "test_*.py" -v
 
+      - name: Kernel benchmark
+        run: python3 tools/bench_kernels.py
+
       - name: clippy
         if: always()
         working-directory: hl3040cn/rust
