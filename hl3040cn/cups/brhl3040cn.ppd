@@ -192,6 +192,17 @@
 *Resolution 600x2400dpi/Fine (2400 dpi class): 	"          "
 *CloseUI: *Resolution
 
+*%==== Edge smoothing (opt-in Ghostscript anti-aliasing) ========
+*% Default Off keeps the output byte-identical to Brother's own filter.
+*OpenUI *BRAA/Edge Smoothing: PickOne
+*OrderDependency: 20 AnySetup *BRAA
+*DefaultBRAA: Off
+*BRAA Off/Off (as Brother): "          "
+*BRAA Text/Smooth Text: "          "
+*BRAA Graphics/Smooth Graphics: "          "
+*BRAA Both/Smooth Text and Graphics: "          "
+*CloseUI: *BRAA
+
 
 *%=== MonoOrColor ================================
 *OpenUI *BRMonoColor/Color / Mono: PickOne

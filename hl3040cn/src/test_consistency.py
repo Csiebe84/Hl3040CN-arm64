@@ -23,7 +23,7 @@ from pathlib import Path
 
 import settings
 import xl2hb
-from settings import InputSlot, MediaType, PageSize, PrintSettings, Resolution
+from settings import EdgeSmoothing, InputSlot, MediaType, PageSize, PrintSettings, Resolution
 
 ROOT = Path(__file__).resolve().parent.parent
 PPD = ROOT / "cups" / "brhl3040cn.ppd"
@@ -451,6 +451,54 @@ class StandardQualityMappingTest(unittest.TestCase):
         self.assertEqual(s.resolution, Resolution.NORMAL)
         s = PrintSettings.from_cups_options("print-quality=4 BRResolution=600x2400dpi", 1, {})
         self.assertEqual(s.resolution, Resolution.FINE)
+
+
+class EdgeSmoothingTest(unittest.TestCase):
+    """The opt-in anti-aliasing switch must default off and reach Ghostscript."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.filter = load_filter()
+
+    def test_default_is_off(self):
+        # Byte-identity with Brother's own filter is the default contract.
+        self.assertEqual(PrintSettings().edge_smoothing, EdgeSmoothing.OFF)
+
+    def test_ppd_exposes_the_switch_with_an_off_default(self):
+        text = PPD.read_text(encoding="latin-1")
+        self.assertIn("*OpenUI *BRAA/", text)
+        self.assertIn("*DefaultBRAA: Off", text)
+        for choice in ("Off", "Text", "Graphics", "Both"):
+            self.assertIn(f"*BRAA {choice}/", text)
+
+    def test_ppd_default_parses_to_off(self):
+        defaults = settings.read_ppd_defaults(PPD)
+        self.assertEqual(defaults.get("BRAA"), "Off")
+        self.assertEqual(PrintSettings.from_cups_options("", 1, defaults).edge_smoothing, EdgeSmoothing.OFF)
+
+    def test_option_values_map_to_the_right_antialiasing(self):
+        for value, text, graphics in (
+            ("Off", False, False),
+            ("Text", True, False),
+            ("Graphics", False, True),
+            ("Both", True, True),
+        ):
+            with self.subTest(value=value):
+                chosen = PrintSettings.from_cups_options(f"BRAA={value}", 1, {}).edge_smoothing
+                cmd = self.filter.build_gs_command("job.ps", "A4", edge_smoothing=chosen)
+                self.assertEqual("-dTextAlphaBits=4" in cmd, text)
+                self.assertEqual("-dGraphicsAlphaBits=4" in cmd, graphics)
+
+    def test_default_command_adds_no_antialiasing(self):
+        # The 2-argument call the raster tests use must stay byte-identical.
+        cmd = self.filter.build_gs_command("job.ps", "A4")
+        self.assertNotIn("-dTextAlphaBits=4", cmd)
+        self.assertNotIn("-dGraphicsAlphaBits=4", cmd)
+
+    def test_unknown_value_keeps_off(self):
+        self.assertEqual(
+            PrintSettings.from_cups_options("BRAA=Krach", 1, {}).edge_smoothing, EdgeSmoothing.OFF
+        )
 
 
 if __name__ == "__main__":

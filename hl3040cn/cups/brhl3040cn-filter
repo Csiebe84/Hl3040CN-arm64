@@ -27,7 +27,7 @@ sys.path.insert(0, _SRC_DIR if os.path.isdir(_SRC_DIR) else _SCRIPT_DIR)
 from marker import host_from_device_uri, marker_lines  # noqa: E402
 from page_stream import iter_ppm_pages  # noqa: E402
 from pipeline import collect_rows, filter_pages, is_blank_page  # noqa: E402
-from settings import DuplexMode, PrintSettings, read_ppd_defaults  # noqa: E402
+from settings import DuplexMode, EdgeSmoothing, PrintSettings, read_ppd_defaults  # noqa: E402
 from xl2hb import PAPER_SIZES  # noqa: E402
 
 # The 3040 sets SetPageOrigin(0, 0): the image starts at the physical page
@@ -93,7 +93,7 @@ def find_gs() -> str:
     return gs
 
 
-def build_gs_command(input_path: str, page_size: str) -> list[str]:
+def build_gs_command(input_path: str, page_size: str, *, edge_smoothing: EdgeSmoothing = EdgeSmoothing.OFF) -> list[str]:
     """Build the Ghostscript command for rasterizing PS to PPM.
 
     Sizes the device with `-g<width>x<height>` in device pixels taken from
@@ -105,6 +105,11 @@ def build_gs_command(input_path: str, page_size: str) -> list[str]:
     The `.HWMargins` prologue is part of Brother's invocation and only
     shows up for content near the physical page edge; without it such
     rows land at the paper margin instead of inside it.
+
+    `edge_smoothing` adds Ghostscript's 4x sub-sampling. Brother's own
+    filter does not, so the default `OFF` keeps the raster byte-identical;
+    the other choices smooth the staircased edges of text and/or graphics
+    at the cost of a raster that no longer matches the original.
     """
     cmd = [
         find_gs(),
@@ -117,6 +122,11 @@ def build_gs_command(input_path: str, page_size: str) -> list[str]:
         "-sstdout=%stderr",
         "-sOutputFile=-",
     ]
+
+    if edge_smoothing in (EdgeSmoothing.TEXT, EdgeSmoothing.BOTH):
+        cmd.append("-dTextAlphaBits=4")
+    if edge_smoothing in (EdgeSmoothing.GRAPHICS, EdgeSmoothing.BOTH):
+        cmd.append("-dGraphicsAlphaBits=4")
 
     width, height = PAPER_SIZES[page_size]
     cmd.extend([f"-g{width}x{height}"])
@@ -235,9 +245,9 @@ def main() -> None:
     ppd_path = os.environ.get("PPD")
     ppd_defaults = read_ppd_defaults(ppd_path) if ppd_path else {}
     settings = PrintSettings.from_cups_options(options_str, copies, ppd_defaults)
-    logger.info("settings: page_size=%s duplex=%s resolution=%s mono=%s color_matching=%s gray=%s toner_save=%s",
+    logger.info("settings: page_size=%s duplex=%s resolution=%s mono=%s color_matching=%s gray=%s toner_save=%s edge_smoothing=%s",
                 settings.page_size, settings.duplex, settings.resolution, settings.mono_color,
-                settings.color_matching, settings.improve_gray, settings.toner_save)
+                settings.color_matching, settings.improve_gray, settings.toner_save, settings.edge_smoothing)
 
     # Reversed long-edge duplex needs the page count up front: a page's
     # position in the reversed job decides whether it is a back side.
@@ -266,7 +276,7 @@ def main() -> None:
         # Run Ghostscript: PS -> PPM stream ("-" reads the inherited stdin).
         # Its stderr goes to a file: a pipe nobody reads while the pages
         # render would block Ghostscript once it filled up.
-        gs_cmd = build_gs_command(input_file or "-", settings.page_size)
+        gs_cmd = build_gs_command(input_file or "-", settings.page_size, edge_smoothing=settings.edge_smoothing)
         logger.info("running: %s", ' '.join(gs_cmd))
 
         gs_stderr_file = tempfile.TemporaryFile()

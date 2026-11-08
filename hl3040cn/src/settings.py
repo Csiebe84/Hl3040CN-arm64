@@ -152,6 +152,29 @@ class ImproveOutput(StrEnum):
     FIX_INTENSITY = "BRFixIntensity"
 
 
+class EdgeSmoothing(StrEnum):
+    """Ghostscript anti-aliasing for text and graphics edges (PPD *BRAA).
+
+    OFF is the default and keeps the output byte-identical to Brother's own
+    filter. TEXT/GRAPHICS/BOTH turn on 4x sub-sampling in Ghostscript, which
+    smooths staircased edges but changes the raster, so it is opt-in.
+    """
+
+    OFF = "OFF"
+    TEXT = "Text"
+    GRAPHICS = "Graphics"
+    BOTH = "Both"
+
+    @classmethod
+    def _missing_(cls, value: object) -> "EdgeSmoothing | None":
+        # The PPD spells the choices Off/Text/Graphics/Both; accept any case.
+        if isinstance(value, str):
+            for member in cls:
+                if member.value.lower() == value.lower():
+                    return member
+        return None
+
+
 class InputSlot(StrEnum):
     """Paper input tray selection (maps to the XL2HB MediaSource attribute)."""
 
@@ -191,6 +214,9 @@ class PrintSettings:
     saturation: int = 0
     skip_blank: bool = False
     reverse: bool = False
+    # Off by default: Brother's filter rasterises without anti-aliasing, so
+    # only an explicit opt-in may change the raster away from byte-identity.
+    edge_smoothing: EdgeSmoothing = EdgeSmoothing.OFF
 
     @classmethod
     def from_rc_file(cls, path: str) -> Self:
@@ -225,6 +251,7 @@ class PrintSettings:
         settings.saturation = int(s.get("Saturation", "0"))
         settings.skip_blank = s.get("BRSkipBlank", "OFF") == "ON"
         settings.reverse = s.get("BRReverse", "OFF") == "ON"
+        settings.edge_smoothing = EdgeSmoothing(s.get("BRAA", settings.edge_smoothing))
         return settings
 
     @classmethod
@@ -263,6 +290,7 @@ class PrintSettings:
             "BRMediaType": ("media_type", MediaType),
             "BRColorMatching": ("color_matching", ColorMatching),
             "BRImproveOutput": ("improve_output", ImproveOutput),
+            "BRAA": ("edge_smoothing", EdgeSmoothing),
         }
         for cups_key, (attr, enum_cls) in enum_map.items():
             if cups_key in opts:
