@@ -46,8 +46,9 @@ inverse colour lookup tables.
 ## Install
 
 ```bash
-git clone https://github.com/<owner>/<repo>.git
-cd <repo>
+git clone https://github.com/Csiebe84/Hl3040CN-arm64.git
+cd Hl3040CN-arm64
+cd hl3040cn
 ./scripts/extract_blobs.sh          # see "Calibration tables" below
 sudo cups/install.sh                # installs the driver, not a queue
 sudo cups/install.sh --add-printer  # ... and create the CUPS queue
@@ -101,7 +102,7 @@ The PPD exposes the same controls as Brother's own driver:
 |---|---|
 | `PageSize` | 22 sizes (Letter, A4, A5, DL, …) |
 | `BRInputSlot` | AutoSelect, Tray1, Manual |
-| `BRResolution` | 600dpi |
+| `BRResolution` | 600dpi (Normal), 600x2400dpi (Fine) |
 | `BRMonoColor` | Auto, Mono, Color |
 | `BRMediaType` | Plain, Thin, Thick, Bond, Envelope, Recycled, Label, Glossy, … |
 | `BRColorMatching` | Normal, Vivid, None |
@@ -252,7 +253,7 @@ To see what the printer reports:
 
 ```bash
 cd hl3040cn/src
-python3 marker.py 192.168.178.50
+python3 marker.py <printer-ip>
 ```
 
 A printer that does not answer is not an error: the report is skipped and the
