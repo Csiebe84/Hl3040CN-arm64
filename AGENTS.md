@@ -472,7 +472,7 @@ touched here.
 - M effectively uses a 10-row screen, not the shipped capt-m 160x20.
 - Binary anchors: stage-1 RLE 0x804f398, stage-2 encoder 0x804f7c8, mode table 0x8070b64,
   .text vaddr base 0x8048e48 (foff = va - 0x8048e48 + 0xe48).
-- Handover docs: FINE_HANDOVER.md (has uncommitted stale §7d claim), TASK_FINE_LEVELS.md.
+- Handover docs: docs/dev/FINE_HANDOVER.md (has uncommitted stale §7d claim), docs/dev/TASK_FINE_LEVELS.md.
 
 ## Fine mode — Zwischenlevel-Lücke geschlossen (2026-10-29)
 - Die letzte byte-identische Lücke war **kein** Raster-/Transition-Modus,
@@ -514,7 +514,7 @@ dort ist inzwischen gekuerzt). Alles in `/root/brother/native/` gemessen, Oracle
   nichtlinear (`dots = (255-ink) > threshold`, 80x80-Schwellen). Fuer Rot:
   M-Dichte 0.797, Y-Dichte 0.581 -> die frueheren "M~177/Y~127" waren nur
   `Dichte*255`. Bit-genau (24 Zeilen, Restfehler 0,22 %) ist Rot **Y-Level 65 =
-  Ink 190** (deckt sich mit STATUS.md, nicht mit NOTES.md). Immer per Dither
+  Ink 190** (deckt sich mit STATUS.md, nicht mit docs/dev/NOTES.md). Immer per Dither
   bit-genau suchen oder vorwaerts vergleichen.
 - **Blockaufteilung ist KEIN eigener Bug:** Oracle M 450 Zeilen @60 B vs. native
   M 2159 Zeilen @12,5 B - **beide flushen bei ~27000 B**
@@ -627,13 +627,13 @@ Skalenfehler. Das Orakel benutzt dort ein nicht ausgeliefertes Raster
 
 **Warum der PPD-Standard `600x2400dpi` (Fine) ist und das wichtig bleibt:** Der
 Normal-Fehler blieb monatelang unentdeckt, weil Fine den Band-Kernel **nie**
-aufruft. Normal ist aber verifiziert (`FINE_HANDOVER.md`: "Normal's grids are
+aufruft. Normal ist aber verifiziert (`docs/dev/FINE_HANDOVER.md`: "Normal's grids are
 already byte-identical - which is why Normal works"), der Kernel-Pfad ist mit
 dem Python-Pfad byte-identisch (50571/5212/32316 B). Der PPD-Standard wurde
 **nicht** geaendert - Fine ist die bessere Qualitaet und die dokumentierte Wahl.
 
-**Offener Punkt an einen Agenten delegiert:** `TASK_TRANSITION.md` +
-`TASK_TRANSITION_LAUNCH.md`, Conversation `909d0256-fde1-4487-932f-30b69313e890`
+**Offener Punkt an einen Agenten delegiert:** `docs/dev/TASK_TRANSITION.md` +
+`docs/dev/TASK_TRANSITION_LAUNCH.md`, Conversation `909d0256-fde1-4487-932f-30b69313e890`
 (Titel "Transition-Modus: Zwischenlevel-Zeilen", 500 Iterationen). Auftrag: die
 Zwischen-Ink-Level-Luecke schliessen (C 50 %, K 17 % der Zeilen weichen ab,
 Level `b8` vs `b0`). Der Auftrag nennt ausdruecklich, was **nicht** zu wiederholen

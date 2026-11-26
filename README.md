@@ -279,8 +279,9 @@ protocol: blob locators, grid solvers and the comparison harness
 
 GPL-3.0-or-later. See `LICENSE`.
 
-The PPD is based on Brother's HL-4150CDN PPD (Copyright (C) 2005 Brother
-Industries, Ltd., GPL-2.0-or-later); the modifications are GPL-3.0-or-later.
+The PPD is based on Brother's HL-3040CN PPD (Copyright (C) 2008-2011
+Brother Industries, Ltd., GPL-2.0-or-later); the modifications are
+GPL-3.0-or-later. Third-party contributions are credited in `NOTICE`.
 
 Brother's calibration tables and filter binaries are **not** distributed
 here and remain the property of Brother Industries, Ltd.

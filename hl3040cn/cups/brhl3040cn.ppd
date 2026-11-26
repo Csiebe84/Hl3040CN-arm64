@@ -4,8 +4,8 @@
 *%      Brother HL-3040CN Open Source Driver
 *%      Ported from the Brother HL-4150CDN driver
 *%        (same XL2HB raster language).
-*%	Based on Brother's HL-4150CDN PPD,
-*%	  Copyright (C) 2005 Brother Industries, Ltd.,
+*%	Based on Brother's HL-3040CN PPD,
+*%	  Copyright (C) 2008-2011 Brother Industries, Ltd.,
 *%	  licensed under GPL-2.0-or-later.
 *%	Modifications Copyright (C) 2026 Claas Flint,
 *%	  licensed under GPL-3.0-or-later.

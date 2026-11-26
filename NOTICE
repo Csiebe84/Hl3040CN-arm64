@@ -1,0 +1,41 @@
+Brother HL-3040CN — native CUPS driver
+
+This project is licensed under GPL-3.0-or-later (see LICENSE).
+
+It is a derivative work and includes or derives from third-party material:
+
+1. brother-hl4150cdn-driver
+   Author: cl445 (https://github.com/cl445/brother-hl4150cdn-driver)
+   Licence: GPL-3.0-or-later
+   The XL2HB raster encoders, the PPM reader, the page stream, the colour
+   LUT generator, the Cython kernels and the CUPS filter entry point are
+   ported from this project. Every file that carries the header
+
+       Ported from cl445/brother-hl4150cdn-driver (GPL-3.0-or-later);
+       modified for the Brother HL-3040CN in 2026.
+
+   is a modified copy; the header also carries the SPDX identifier
+   GPL-3.0-or-later.
+
+2. Brother HL-3040CN PPD
+   Copyright (C) 2008-2011 Brother Industries, Ltd.
+   Licence: GPL-2.0-or-later
+   The CUPS PPD (hl3040cn/cups/brhl3040cn.ppd) is based on Brother's own
+   PPD for this printer; the modifications are GPL-3.0-or-later.
+
+3. bieniu/brother (Python package "brother")
+   Licence: Apache-2.0
+   The SNMP supply decoder in hl3040cn/src/brsupply.py is ported from this
+   package, together with its captured printer payloads used as test fixtures.
+
+Not included: Brother's proprietary calibration tables (colour grids, BRCD
+dither tables) and the original filter binaries. These are not redistributed
+here; scripts/extract_blobs.sh obtains them locally from a Brother package
+the user supplies, for interoperability (EU directive 2009/24/EC, Art. 6).
+
+Trademarks
+----------
+"Brother" and "HL-3040CN" are trademarks of Brother Industries, Ltd. They are
+used here only to describe the hardware this software is compatible with. This
+project is independent and is not affiliated with, endorsed by, or supported by
+Brother Industries, Ltd.
